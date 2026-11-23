@@ -1,0 +1,110 @@
+{
+  "realm": "payflow",
+  "enabled": true,
+  "sslRequired": "external",
+  "accessTokenLifespan": 300,
+  "bruteForceProtected": true,
+  "failureFactor": 5,
+  "permanentLockout": false,
+  "roles": {
+    "realm": [
+      {
+        "name": "payments:write"
+      },
+      {
+        "name": "payments:read"
+      },
+      {
+        "name": "ops"
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "payflow-test",
+      "enabled": true,
+      "publicClient": true,
+      "directAccessGrantsEnabled": true,
+      "standardFlowEnabled": false,
+      "protocol": "openid-connect",
+      "defaultClientScopes": [
+        "basic",
+        "profile",
+        "email",
+        "roles"
+      ],
+      "optionalClientScopes": [],
+      "protocolMappers": [
+        {
+          "name": "payflow-api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "payflow-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "alice",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Alice",
+      "lastName": "Demo",
+      "email": "alice@payflow.local",
+      "realmRoles": [
+        "payments:write",
+        "payments:read"
+      ],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "alice",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "bob",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Bob",
+      "lastName": "Demo",
+      "email": "bob@payflow.local",
+      "realmRoles": [
+        "payments:write",
+        "payments:read"
+      ],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "bob",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "ops",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Ops",
+      "lastName": "Demo",
+      "email": "ops@payflow.local",
+      "realmRoles": [
+        "ops"
+      ],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "ops",
+          "temporary": false
+        }
+      ]
+    }
+  ]
+}

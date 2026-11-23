@@ -1,0 +1,324 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>com.siddheshfulawade.payflow</groupId>
+  <artifactId>payflow</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
+  <packaging>pom</packaging>
+  <name>PayFlow</name>
+  <description>Crash-safe payment orchestration: three Spring Boot services over Kafka with an orchestrated saga.</description>
+
+  <modules>
+    <module>contracts</module>
+    <module>messaging</module>
+    <module>payment-service</module>
+    <module>wallet-service</module>
+    <module>risk-service</module>
+    <module>reconciliation</module>
+    <module>system-tests</module>
+  </modules>
+
+  <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+    <!-- Compile for 21 so JDK 21 and 25 both build it (CLAUDE.md). -->
+    <maven.compiler.release>21</maven.compiler.release>
+    <java.minimum.version>21</java.minimum.version>
+    <!-- JaCoCo line gate per module (CLAUDE.md: >= 80 % per service module). -->
+    <coverage.line.minimum>0.80</coverage.line.minimum>
+
+    <!-- Test tags excluded by default. Unit tests run everywhere (Windows CI too).
+         -Pit turns on the Testcontainers tests (tag "it"), -Psystem the full-stack and chaos tests
+         (tag "system"). A profile replaces its tag with "none", a tag no test uses, so -Pit,system
+         runs both. Docker is required for both; without it they fail, they do not skip. -->
+    <tag.it.excluded>it</tag.it.excluded>
+    <tag.system.excluded>system</tag.system.excluded>
+
+    <!-- Platform and runtime dependencies: see docs/adr/0001-dependencies.md -->
+    <spring-boot.version>4.1.2</spring-boot.version>
+    <hazelcast.version>5.7.0</hazelcast.version>
+
+    <!-- Test dependencies outside the Boot BOM: see docs/adr/0001-dependencies.md -->
+    <jqwik.version>1.10.2</jqwik.version>
+    <archunit.version>1.5.1</archunit.version>
+
+    <!-- Build plugins (aligned with settlement-lab) -->
+    <compiler.plugin.version>3.16.0</compiler.plugin.version>
+    <surefire.plugin.version>3.6.1</surefire.plugin.version>
+    <jar.plugin.version>3.5.1</jar.plugin.version>
+    <clean.plugin.version>3.5.0</clean.plugin.version>
+    <resources.plugin.version>3.5.0</resources.plugin.version>
+    <install.plugin.version>3.2.0</install.plugin.version>
+    <deploy.plugin.version>3.2.0</deploy.plugin.version>
+    <site.plugin.version>3.22.0</site.plugin.version>
+    <enforcer.plugin.version>3.7.0</enforcer.plugin.version>
+    <jacoco.plugin.version>0.8.16</jacoco.plugin.version>
+    <spotless.plugin.version>3.11.0</spotless.plugin.version>
+    <palantir.format.version>2.103.0</palantir.format.version>
+  </properties>
+
+  <dependencyManagement>
+    <dependencies>
+      <!-- Imported, not used as the parent, so the build's parent stays ours (ADR-0001). It also
+           manages Jackson, Spring Kafka, Spring Batch, Flyway, the PostgreSQL driver, JUnit,
+           AssertJ, Awaitility and Testcontainers. -->
+      <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-dependencies</artifactId>
+        <version>${spring-boot.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+      <dependency>
+        <groupId>com.siddheshfulawade.payflow</groupId>
+        <artifactId>contracts</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.siddheshfulawade.payflow</groupId>
+        <artifactId>messaging</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <!-- Open-source (Community) edition, Apache License 2.0 (ADR-0001). -->
+        <groupId>com.hazelcast</groupId>
+        <artifactId>hazelcast</artifactId>
+        <version>${hazelcast.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>net.jqwik</groupId>
+        <artifactId>jqwik</artifactId>
+        <version>${jqwik.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.tngtech.archunit</groupId>
+        <artifactId>archunit-junit5</artifactId>
+        <version>${archunit.version}</version>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <!-- Every module is tested the same way: JUnit 5, AssertJ and ArchUnit. -->
+  <dependencies>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.platform</groupId>
+      <artifactId>junit-platform-launcher</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.tngtech.archunit</groupId>
+      <artifactId>archunit-junit5</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <pluginManagement>
+      <plugins>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-compiler-plugin</artifactId>
+          <version>${compiler.plugin.version}</version>
+          <configuration>
+            <!-- Keep parameter names so Spring can bind @PathVariable/@RequestParam by name. -->
+            <parameters>true</parameters>
+            <compilerArgs>
+              <arg>-Xlint:all</arg>
+              <!-- Annotation processing is off on purpose; silence only that note. -->
+              <arg>-Xlint:-processing</arg>
+              <arg>-Werror</arg>
+            </compilerArgs>
+          </configuration>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-surefire-plugin</artifactId>
+          <version>${surefire.plugin.version}</version>
+          <configuration>
+            <excludedGroups>${tag.it.excluded},${tag.system.excluded}</excludedGroups>
+          </configuration>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-jar-plugin</artifactId>
+          <version>${jar.plugin.version}</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-clean-plugin</artifactId>
+          <version>${clean.plugin.version}</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-resources-plugin</artifactId>
+          <version>${resources.plugin.version}</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-install-plugin</artifactId>
+          <version>${install.plugin.version}</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-deploy-plugin</artifactId>
+          <version>${deploy.plugin.version}</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-site-plugin</artifactId>
+          <version>${site.plugin.version}</version>
+        </plugin>
+        <plugin>
+          <groupId>org.springframework.boot</groupId>
+          <artifactId>spring-boot-maven-plugin</artifactId>
+          <version>${spring-boot.version}</version>
+          <executions>
+            <execution>
+              <goals>
+                <goal>repackage</goal>
+              </goals>
+            </execution>
+          </executions>
+        </plugin>
+      </plugins>
+    </pluginManagement>
+
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-enforcer-plugin</artifactId>
+        <version>${enforcer.plugin.version}</version>
+        <executions>
+          <execution>
+            <id>enforce-toolchain</id>
+            <goals>
+              <goal>enforce</goal>
+            </goals>
+            <configuration>
+              <rules>
+                <requireJavaVersion>
+                  <version>[${java.minimum.version},)</version>
+                </requireJavaVersion>
+                <requireMavenVersion>
+                  <version>[3.9,)</version>
+                </requireMavenVersion>
+                <dependencyConvergence/>
+                <requirePluginVersions/>
+                <bannedDependencies>
+                  <!-- Hazelcast Enterprise is not open source (ADR-0001). -->
+                  <excludes>
+                    <exclude>com.hazelcast:hazelcast-enterprise*</exclude>
+                  </excludes>
+                </bannedDependencies>
+              </rules>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+
+      <plugin>
+        <groupId>com.diffplug.spotless</groupId>
+        <artifactId>spotless-maven-plugin</artifactId>
+        <version>${spotless.plugin.version}</version>
+        <configuration>
+          <java>
+            <palantirJavaFormat>
+              <version>${palantir.format.version}</version>
+            </palantirJavaFormat>
+            <removeUnusedImports/>
+            <trimTrailingWhitespace/>
+            <endWithNewline/>
+          </java>
+        </configuration>
+        <executions>
+          <execution>
+            <id>check-format</id>
+            <phase>verify</phase>
+            <goals>
+              <goal>check</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+
+      <plugin>
+        <groupId>org.jacoco</groupId>
+        <artifactId>jacoco-maven-plugin</artifactId>
+        <version>${jacoco.plugin.version}</version>
+        <configuration>
+          <excludes>
+            <!-- Boot entry points only call SpringApplication.run; the context tests prove they start.
+                 Counting their main() line would push tiny modules under the gate (README Decisions). -->
+            <exclude>**/*Application.class</exclude>
+          </excludes>
+        </configuration>
+        <executions>
+          <execution>
+            <id>prepare-agent</id>
+            <goals>
+              <goal>prepare-agent</goal>
+            </goals>
+          </execution>
+          <execution>
+            <id>report</id>
+            <phase>verify</phase>
+            <goals>
+              <goal>report</goal>
+            </goals>
+          </execution>
+          <execution>
+            <id>check-coverage</id>
+            <phase>verify</phase>
+            <goals>
+              <goal>check</goal>
+            </goals>
+            <configuration>
+              <rules>
+                <rule>
+                  <element>BUNDLE</element>
+                  <limits>
+                    <limit>
+                      <counter>LINE</counter>
+                      <value>COVEREDRATIO</value>
+                      <minimum>${coverage.line.minimum}</minimum>
+                    </limit>
+                  </limits>
+                </rule>
+              </rules>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+
+  <profiles>
+    <profile>
+      <!-- ./mvnw verify -Pit : Testcontainers integration tests (Docker required). -->
+      <id>it</id>
+      <properties>
+        <tag.it.excluded>none</tag.it.excluded>
+      </properties>
+    </profile>
+    <profile>
+      <!-- ./mvnw verify -Psystem : full-stack and chaos tests in system-tests (Docker required). -->
+      <id>system</id>
+      <properties>
+        <tag.system.excluded>none</tag.system.excluded>
+      </properties>
+    </profile>
+  </profiles>
+</project>

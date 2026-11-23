@@ -29,6 +29,21 @@ docker compose -f deploy/compose.yaml up -d
 
 Filled in task by task: what was chosen, the alternative, and why.
 
+- **Spring Boot BOM imported, not the parent** — alternative: `spring-boot-starter-parent` — our own parent holds the
+  build rules (enforcer, Spotless, JaCoCo, test tags) shared by libraries and services, and Maven allows one parent.
+- **Monorepo with shared `contracts` and `messaging` jars** — alternative: a repository per service with copied
+  message classes — one change updates every service in one pull request; the cost is coupling through shared jars
+  (ADR-0002 #1, SPEC §3 trade-off).
+- **JaCoCo excludes `*Application` bootstrap classes** — alternative: a test that calls `main()`, or lowering the
+  gate — `main()` only calls `SpringApplication.run`, and the context tests already start each app.
+- **Spring Boot 4.1.2** — alternative: 4.2.0, which exists — same version as settlement-lab for alignment across
+  projects; upgrading later is one separate change.
+- **Hazelcast 5.7.0 Community (Apache 2.0)** — alternative: Enterprise, or the CP Subsystem for strict
+  consistency — Enterprise is not open source (the enforcer bans it), and velocity limits need only IMap with an
+  EntryProcessor, not CP.
+- **One PostgreSQL server, one database and owner per service** — alternative: a server per service — the same
+  separation of data (CONNECT revoked from PUBLIC) for a laptop demo with less RAM.
+
 ## Results
 
 The chaos scenarios table and the reconciliation numbers arrive with PF-09 and PF-10.
