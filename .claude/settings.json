@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "disableBypassPermissionsMode": "disable",
+    "blockWritesOutsideWorkingDirectories": true,
+    "allow": [
+      "Bash(mvnw.cmd *)", "Bash(./mvnw *)", "Bash(node --test *)",
+      "Bash(docker ps*)", "Bash(docker version*)", "Bash(docker info*)", "Bash(docker logs *)",
+      "Bash(docker compose -f deploy/compose.yaml *)",
+      "Bash(git status*)", "Bash(git diff*)", "Bash(git log*)", "Bash(git show*)", "Bash(git branch*)",
+      "Bash(git add *)", "Bash(git commit *)", "Bash(git switch *)", "Bash(git fetch*)", "Bash(git pull *)",
+      "Bash(git push *)", "Bash(git merge origin/*)", "Bash(git worktree *)", "Bash(git tag v*)",
+      "Bash(gh pr *)", "Bash(gh run *)", "Bash(gh repo view*)"
+    ],
+    "ask": [
+      "Bash(git reset *)", "Bash(git clean *)", "Bash(git filter-branch *)", "Bash(git filter-repo *)",
+      "Bash(git config *)", "Bash(gh api *)", "Bash(gh secret *)", "Bash(gh repo *)", "Bash(gh release *)",
+      "Bash(docker run *)", "Bash(docker system *)", "Bash(docker volume rm *)",
+      "Bash(npm install *)", "Bash(npm i *)", "Bash(winget *)", "Bash(choco *)", "Bash(scoop *)",
+      "Bash(setx *)", "Bash(reg *)", "Bash(schtasks *)", "Bash(shutdown *)",
+      "Edit(.claude/hooks/**)", "Edit(.claude/settings.json)", "Edit(.mcp.json)"
+    ],
+    "deny": [
+      "Read(**/.env)", "Read(**/.env.*)", "Read(**/secrets/**)", "Read(**/*.pem)", "Read(**/*.key)",
+      "Read(**/*.p12)", "Read(**/*.pfx)", "Read(**/*.jks)", "Read(**/*.keystore)",
+      "Read(**/id_rsa*)", "Read(**/id_ed25519*)", "Read(**/id_ecdsa*)", "Read(**/.git-credentials)",
+      "Read(~/.ssh/**)", "Read(~/.gnupg/**)", "Read(~/.aws/**)", "Read(~/.azure/**)", "Read(~/.config/gh/**)",
+      "Read(~/.docker/config.json)", "Read(~/.kube/**)", "Read(~/.m2/settings*.xml)", "Read(~/.npmrc)",
+      "Read(~/.netrc)", "Read(~/_netrc)", "Read(~/.claude/.credentials.json)",
+      "Edit(**/.env*)", "Edit(**/secrets/**)", "Edit(**/*.pem)", "Edit(**/*.key)", "Edit(**/*.p12)",
+      "Edit(**/*.pfx)", "Edit(**/*.jks)", "Edit(~/.ssh/**)", "Edit(~/.aws/**)", "Edit(~/.gitconfig)",
+      "Edit(~/.npmrc)", "Edit(~/.claude/settings.json)",
+      "Bash(git push --force*)", "Bash(git push -f*)", "Bash(gh auth token*)", "Bash(git credential *)",
+      "Bash(git clean -x*)", "Bash(git clean -fdx*)", "Bash(git clean -fx*)", "Bash(rm -rf /*)", "Bash(rm -rf ~*)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [{ "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.mjs\"" }] }
+    ],
+    "PreToolUse": [
+      { "matcher": "Bash|PowerShell",
+        "hooks": [{ "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-bash.mjs\"" }] },
+      { "matcher": "Read|Edit|Write|MultiEdit|Grep|Glob|NotebookEdit",
+        "hooks": [{ "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/protect-secrets.mjs\"" }] }
+    ]
+  }
+}
