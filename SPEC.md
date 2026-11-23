@@ -146,7 +146,7 @@ Chaos and operations
 step_attempts, deadline_at, version, created_at, updated_at, unique(client_id, idempotency_key))`,
   `payment_event` (audit of transitions), `outbox`, `inbox`.
 - wallet DB: `wallet(id pk, owner_sub, available, held, status, version, CHECK(available>=0), CHECK(held>=0))`,
-  `hold(payment_id pk, payer, amount, state)`, `ledger_entry` (every movement, for statements), `outbox`, `inbox`.
+  `hold(payment_id pk, payer, amount, state, reason, payee)`, `ledger_entry` (every movement, for statements), `outbox`, `inbox`.
 - risk DB: `risk_decision(payment_id pk, decision, rule, decided_at)`, `daily_total(payer, date, amount)`, `outbox`, `inbox`.
 - recon DB: Spring Batch job repository, `recon_staging`, `recon_result`.
 
@@ -173,9 +173,9 @@ and run on Ubuntu only) and `system` on Ubuntu (chaos tests, on every PR to main
 - [x] PF-01 Build skeleton: Maven wrapper, parent pom (Boot BOM aligned with settlement-lab), all modules empty but
       wired, enforcer, Spotless, JaCoCo, ArchUnit rules, ADR-0001 entries, CI `verify` job, `deploy/compose.yaml` with
       PostgreSQL (4 databases), Kafka (KRaft), Keycloak with the `payflow` realm import
-- [ ] PF-02 `contracts` and `messaging`: message records with version, outbox + relay with `SKIP LOCKED`, inbox and
+- [x] PF-02 `contracts` and `messaging`: message records with version, outbox + relay with `SKIP LOCKED`, inbox and
       idempotent consumer helper; Testcontainers tests for crash between DB commit and publish, duplicate delivery (REQ-PF-020 to 022)
-- [ ] PF-03 wallet-service: schema, reserve/release/capture handlers, replies, invariant and concurrency tests,
+- [x] PF-03 wallet-service: schema, reserve/release/capture handlers, replies, invariant and concurrency tests,
       ops seeding API (REQ-PF-030, 021)
 - [ ] PF-04 risk-service: rules, Hazelcast 2-member velocity with `EntryProcessor`, daily totals, idempotent
       decisions (REQ-PF-031, 032)

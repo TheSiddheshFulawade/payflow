@@ -63,6 +63,27 @@ Filled in task by task: what was chosen, the alternative, and why.
   Jackson's lenient defaults — the defaults silently turned `100.99` into `100` and let a second `amount` key win
   (found by the PF-02 security review). Money must fail loudly, and a bounded record can never block the outbox relay.
   Error messages name the field, never its value, so logs and the DLT carry no payment data.
+- **Hold row = permanent decision, and a per-payment lock** — alternative: a PostgreSQL advisory lock, or the inbox
+  alone — the sweeper re-sends with a new message id, so the inbox cannot see the duplicate; the primary key on
+  `hold.payment_id` records the decision once and serialises all commands of one payment.
+- **Relative guarded updates under ordered row locks** — alternative: read-then-write with a `version` check — the
+  database applies `available = available - amount` to the current value, so no update overwrites another and a busy
+  wallet never retries; wallets lock in id order, so crossing payments cannot deadlock.
+- **Release tombstone** — alternative: ignore a Release with no hold — two `SKIP LOCKED` relays can deliver Release
+  before Reserve; without the tombstone the late Reserve would hold money for a payment that already ended REFUNDED.
+- **Unique `(payment_id, kind)` ledger index** — alternative: trust the code — a payment can never move money twice
+  even if a code bug slips past the tests; the database refuses it.
+- **Seeding needs no Idempotency-Key; the wallet id is the key (409 on a retry)** — alternative: a key header — the
+  id already names the one wallet, so a retried seed changes nothing and says so.
+- **16 KiB body limit by Content-Length; chunked bodies refused 411 on every write method** — alternative: buffer and
+  count bytes — the container never reads past the declared length, so an endless body cannot use memory. The filter
+  runs first and Boot's form filter is off, because that filter reads PUT/PATCH/DELETE form bodies before any limit.
+- **A command that contradicts a held or captured hold is a poison message, not a rejection** — alternative: reply
+  `FundsRejected(HOLD_MISMATCH)` — a rejection could end the saga REJECTED while the money is still held; the dead-letter
+  topic keeps it for a human, with a fixed text and no account values. The hold records the payee on capture so a
+  re-sent capture naming another payee is caught too.
+- **DB password from the environment, no default** — alternative: a demo default in `application.yml` — a missing
+  secret fails at startup instead of silently using a known one; demo values live only in `deploy/`.
 
 ## Results
 
