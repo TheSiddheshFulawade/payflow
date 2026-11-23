@@ -22,3 +22,12 @@ Status: accepted, 2026-11-23
 - `contracts` and `messaging` are shared jars: a breaking change touches all services in one PR (accepted).
 - At-least-once delivery everywhere: every handler must be idempotent, and the tests prove it.
 - No cloud deployment in v1: everything runs with Docker Compose, recorded in the README.
+
+## Trust boundary (added at PF-03)
+
+- Kafka is inside the trust boundary in v1: whoever can write to `wallet.commands` can move money. JWTs protect the
+  REST APIs only. The demo broker is PLAINTEXT and its host port is published on 127.0.0.1 only.
+- A real deployment needs SASL or mTLS and per-topic ACLs: only payment-service writes `*.commands`, only
+  wallet-service writes `wallet.replies`, only risk-service writes `risk.replies`, and few people read `*.dlt`.
+- Defence in depth that v1 does have: strict decoding, a command that contradicts the recorded hold is poison
+  (dead-letter topic, no effect), guarded SQL and database `CHECK`s.

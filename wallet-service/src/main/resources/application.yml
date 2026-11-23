@@ -1,8 +1,29 @@
 spring:
   application:
     name: wallet-service
+  # Defaults match deploy/compose.yaml. The password has no default on purpose: demo secrets live in deploy/ only.
+  datasource:
+    # logServerErrorDetail=false: row values stay out of logs and the dead-letter topic
+    url: ${WALLET_DB_URL:jdbc:postgresql://localhost:5432/wallet?logServerErrorDetail=false}
+    username: ${WALLET_DB_USER:wallet}
+    password: ${WALLET_DB_PASSWORD}
+    hikari:
+      # a stuck transaction must not block a partition forever: the lock wait ends in an error and the command is retried
+      connection-init-sql: set lock_timeout = '5s'
+  flyway:
+    # V1 (outbox, inbox) comes from messaging; this service's scripts start at V2.
+    locations: classpath:db/messaging,classpath:db/migration
+  mvc:
+    formcontent:
+      filter:
+        # Boot's form filter reads PUT/PATCH/DELETE bodies; BodyLimitFilter must decide on size before any read
+        enabled: false
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
 
 server:
+  # no authentication until PF-07, so loopback only; the container sets WALLET_BIND=0.0.0.0
+  address: ${WALLET_BIND:127.0.0.1}
   port: 8082
 
 management:
