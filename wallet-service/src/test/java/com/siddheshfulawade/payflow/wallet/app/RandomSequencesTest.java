@@ -2,13 +2,17 @@ package com.siddheshfulawade.payflow.wallet.app;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.siddheshfulawade.payflow.contracts.CaptureFunds;
 import com.siddheshfulawade.payflow.contracts.Envelope;
+import com.siddheshfulawade.payflow.contracts.PoisonMessageException;
 import com.siddheshfulawade.payflow.wallet.support.WalletIntegrationTest;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -37,6 +41,7 @@ class RandomSequencesTest extends WalletIntegrationTest {
         long seeded = WALLETS * SEED_BALANCE;
 
         List<Envelope> messages = new ArrayList<>();
+        Set<UUID> wrongAmountCaptures = new HashSet<>();
         for (int i = 0; i < 150; i++) {
             UUID payment = UUID.randomUUID();
             String payer = random.nextInt(30) == 0 ? "ghost" : ids.get(random.nextInt(WALLETS));
@@ -48,7 +53,11 @@ class RandomSequencesTest extends WalletIntegrationTest {
             messages.add(reserve(payment, payer, amount));
             if (random.nextInt(10) < 7) {
                 // 1 in 20 captures names the wrong amount
-                messages.add(capture(payment, payer, payee, random.nextInt(20) == 0 ? amount + 1 : amount));
+                boolean wrong = random.nextInt(20) == 0;
+                if (wrong) {
+                    wrongAmountCaptures.add(payment);
+                }
+                messages.add(capture(payment, payer, payee, wrong ? amount + 1 : amount));
             }
             if (random.nextInt(10) < 4) {
                 messages.add(release(payment, payer, amount));
@@ -73,13 +82,28 @@ class RandomSequencesTest extends WalletIntegrationTest {
                         statuses[random.nextInt(statuses.length)],
                         ids.get(random.nextInt(WALLETS)));
             }
-            consumer.handle(message, handler::handle);
+            try {
+                consumer.handle(message, handler::handle);
+            } catch (PoisonMessageException poison) {
+                // only a capture that contradicts its hold may be refused this way; anything else is a bug
+                assertThat(message.payload() instanceof CaptureFunds
+                                && wrongAmountCaptures.contains(message.paymentId()))
+                        .as("%s of payment %s is poison", message.type(), message.paymentId())
+                        .isTrue();
+            }
         }
 
         assertThat(totalMoney()).as("sum(available + held)").isEqualTo(seeded);
         assertHeldEqualsReservedHolds();
         assertBalancesFollowTheLedger();
         assertLedgerMatchesHoldStates();
+        assertNeverCaptured(wrongAmountCaptures);
+    }
+
+    /** A capture that names the wrong amount never moves money. */
+    private void assertNeverCaptured(Set<UUID> payments) {
+        assertThat(jdbc.queryForList("select payment_id from hold where state = 'CAPTURED'", UUID.class))
+                .doesNotContainAnyElementsOf(payments);
     }
 
     /** Σ held of a wallet == Σ amount of its RESERVED holds. */
