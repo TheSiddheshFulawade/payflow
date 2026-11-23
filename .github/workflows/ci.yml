@@ -1,0 +1,92 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Least privilege: the jobs only read the repository.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Job names are stable on purpose: they are the required checks on main.
+# Actions are pinned by commit SHA (the tag is in the comment).
+jobs:
+  verify:
+    # Unit tests, Spotless, ArchUnit, JaCoCo and the enforcer on both supported JDKs and both OSes:
+    # 21 proves the release-21 rule, 25 is the newest runtime. No Docker needed.
+    name: verify (${{ matrix.os }}, JDK ${{ matrix.java }})
+    strategy:
+      fail-fast: false # one cell failing must not cancel (and hide) the others
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+        java: ['21', '25']
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash # the same ./mvnw and retry loop on both OSes (Git Bash on Windows runners)
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+          cache: maven
+      # Downloads only, retried, with Google's Central mirror as a fallback repository.
+      # Checksums are checked strictly (-C). Tests are never retried.
+      - name: Download Maven, dependencies and plugins
+        run: |
+          for attempt in 1 2 3; do
+            ./mvnw --batch-mode --quiet -C -s .github/maven-ci-settings.xml \
+              org.apache.maven.plugins:maven-dependency-plugin:3.11.0:go-offline && exit 0
+            echo "Download attempt $attempt failed; retrying in $((attempt * 15)) s"
+            sleep $((attempt * 15))
+          done
+          exit 1
+      - name: Verify
+        run: ./mvnw --batch-mode -C -s .github/maven-ci-settings.xml verify
+
+  integration:
+    # Testcontainers tests (tag "it"): Linux Docker only, so Ubuntu with the newest JDK.
+    name: integration (ubuntu-24.04, JDK 25)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+      - name: Download Maven, dependencies and plugins
+        run: |
+          for attempt in 1 2 3; do
+            ./mvnw --batch-mode --quiet -C -s .github/maven-ci-settings.xml \
+              org.apache.maven.plugins:maven-dependency-plugin:3.11.0:go-offline && exit 0
+            echo "Download attempt $attempt failed; retrying in $((attempt * 15)) s"
+            sleep $((attempt * 15))
+          done
+          exit 1
+      # Pre-pull the test images, retried, so a flaky registry does not fail the tests.
+      # Tags must equal the ones in deploy/compose.yaml and the test code (DeployConfigTest checks compose).
+      - name: Pre-pull test images
+        run: |
+          for image in postgres:18.7-alpine3.24 apache/kafka:4.4.0; do
+            for attempt in 1 2 3; do
+              docker pull "$image" && break
+              [ "$attempt" = 3 ] && exit 1
+              echo "Pull of $image failed (attempt $attempt); retrying in $((attempt * 15)) s"
+              sleep $((attempt * 15))
+            done
+          done
+      - name: Verify with integration tests
+        run: ./mvnw --batch-mode -C -s .github/maven-ci-settings.xml verify -Pit
