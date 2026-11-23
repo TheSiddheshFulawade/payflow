@@ -170,7 +170,7 @@ and run on Ubuntu only) and `system` on Ubuntu (chaos tests, on every PR to main
 
 ## 8. Tasks (feature-sized, test-first, in order)
 
-- [ ] PF-01 Build skeleton: Maven wrapper, parent pom (Boot BOM aligned with settlement-lab), all modules empty but
+- [x] PF-01 Build skeleton: Maven wrapper, parent pom (Boot BOM aligned with settlement-lab), all modules empty but
       wired, enforcer, Spotless, JaCoCo, ArchUnit rules, ADR-0001 entries, CI `verify` job, `deploy/compose.yaml` with
       PostgreSQL (4 databases), Kafka (KRaft), Keycloak with the `payflow` realm import
 - [ ] PF-02 `contracts` and `messaging`: message records with version, outbox + relay with `SKIP LOCKED`, inbox and
