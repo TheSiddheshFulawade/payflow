@@ -9,7 +9,6 @@ import com.tngtech.archunit.lang.ArchRule;
 
 /**
  * The messaging library is shared infrastructure: it must never know a service (SPEC.md section 3).
- * Remove {@code allowEmptyShould} once the module has its first class.
  */
 @AnalyzeClasses(
         packages = "com.siddheshfulawade.payflow.messaging",
@@ -24,6 +23,5 @@ class ArchitectureTest {
                     "com.siddheshfulawade.payflow.payment..",
                     "com.siddheshfulawade.payflow.wallet..",
                     "com.siddheshfulawade.payflow.risk..",
-                    "com.siddheshfulawade.payflow.recon..")
-            .allowEmptyShould(true);
+                    "com.siddheshfulawade.payflow.recon..");
 }

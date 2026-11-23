@@ -12,7 +12,14 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.core.env.Environment;
 import org.springframework.test.web.servlet.MockMvc;
 
-@SpringBootTest(classes = PaymentServiceApplication.class)
+// Smoke test of the web layer only: it runs in the default build without Docker, so the database and the
+// messaging library (outbox, relay, inbox) are switched off here. The service tests with PostgreSQL and Kafka
+// are Testcontainers tests (tag "it").
+@SpringBootTest(
+        classes = PaymentServiceApplication.class,
+        properties = "spring.autoconfigure.exclude="
+                + "org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration,"
+                + "com.siddheshfulawade.payflow.messaging.MessagingAutoConfiguration")
 @AutoConfigureMockMvc
 class PaymentServiceApplicationHealthTest {
 

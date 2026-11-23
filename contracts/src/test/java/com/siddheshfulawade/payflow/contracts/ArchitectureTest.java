@@ -9,8 +9,7 @@ import com.tngtech.archunit.lang.ArchRule;
 
 /**
  * The contracts are plain message records shared by every service (SPEC.md section 3). Only
- * production classes are checked. Remove {@code allowEmptyShould} once the module has its first
- * class, so that a rename cannot silently switch the rule off.
+ * production classes are checked.
  */
 @AnalyzeClasses(
         packages = "com.siddheshfulawade.payflow.contracts",
@@ -18,11 +17,8 @@ import com.tngtech.archunit.lang.ArchRule;
 class ArchitectureTest {
 
     @ArchTest
-    static final ArchRule contractsHaveNoSpring = noClasses()
-            .should()
-            .dependOnClassesThat()
-            .resideInAPackage("org.springframework..")
-            .allowEmptyShould(true);
+    static final ArchRule contractsHaveNoSpring =
+            noClasses().should().dependOnClassesThat().resideInAPackage("org.springframework..");
 
     @ArchTest
     static final ArchRule contractsDependOnNoOtherPayflowPackage = noClasses()
@@ -33,6 +29,5 @@ class ArchitectureTest {
                     "com.siddheshfulawade.payflow.payment..",
                     "com.siddheshfulawade.payflow.wallet..",
                     "com.siddheshfulawade.payflow.risk..",
-                    "com.siddheshfulawade.payflow.recon..")
-            .allowEmptyShould(true);
+                    "com.siddheshfulawade.payflow.recon..");
 }

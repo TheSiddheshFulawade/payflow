@@ -13,4 +13,12 @@
   <artifactId>contracts</artifactId>
   <name>PayFlow · contracts</name>
   <description>Message records (commands and replies), topic names and JSON serialisation shared by the services.</description>
+
+  <!-- Only Jackson (version from the Boot BOM, ADR-0001). No Spring: the contracts are plain records. -->
+  <dependencies>
+    <dependency>
+      <groupId>tools.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+    </dependency>
+  </dependencies>
 </project>

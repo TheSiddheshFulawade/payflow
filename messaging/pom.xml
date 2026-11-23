@@ -13,4 +13,75 @@
   <artifactId>messaging</artifactId>
   <name>PayFlow · messaging</name>
   <description>Transactional outbox with a polling relay, and the inbox for idempotent consumers.</description>
+
+  <properties>
+    <!-- Everything here needs PostgreSQL and Kafka, so it is covered by the Testcontainers tests (tag "it"),
+         which the default build (Windows CI too) does not run. Without them the JaCoCo gate would measure 0 %.
+         The coverage gate therefore runs only with -Pit (same as settlement-lab ledger-postgres). -->
+    <jacoco.skip>true</jacoco.skip>
+  </properties>
+
+  <!-- All versions from the Spring Boot BOM (ADR-0001). -->
+  <dependencies>
+    <dependency>
+      <groupId>com.siddheshfulawade.payflow</groupId>
+      <artifactId>contracts</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-jdbc</artifactId>
+    </dependency>
+    <dependency>
+      <!-- Boot 4: the Kafka auto-configuration lives in its own module (spring-boot-kafka) behind this starter. -->
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-kafka</artifactId>
+    </dependency>
+    <dependency>
+      <!-- Boot 4: Flyway is only auto-configured through spring-boot-flyway (this starter), not flyway-core alone. -->
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-flyway</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.flywaydb</groupId>
+      <artifactId>flyway-database-postgresql</artifactId>
+      <!-- runtime: Flyway loads the PostgreSQL support through ServiceLoader; no code compiles against it -->
+      <scope>runtime</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.postgresql</groupId>
+      <artifactId>postgresql</artifactId>
+      <scope>runtime</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.awaitility</groupId>
+      <artifactId>awaitility</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>testcontainers-postgresql</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>testcontainers-kafka</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <profiles>
+    <profile>
+      <!-- -Pit runs the Testcontainers tests, so the 80 % line gate applies here. -->
+      <id>it</id>
+      <properties>
+        <jacoco.skip>false</jacoco.skip>
+      </properties>
+    </profile>
+  </profiles>
 </project>

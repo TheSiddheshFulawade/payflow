@@ -34,8 +34,8 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
-      # Left on for now; topics get created explicitly in PF-02.
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      # Off: every topic is declared by the services (messaging NewTopic beans), so a misspelt name fails loudly.
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
     ports:
       - "127.0.0.1:9092:9092"
     healthcheck:
