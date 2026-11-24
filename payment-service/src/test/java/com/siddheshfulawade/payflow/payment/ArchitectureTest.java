@@ -13,9 +13,7 @@ import com.tngtech.archunit.lang.ArchRule;
  * Package rules from SPEC.md section 3. Only production classes are checked: tests may use any test
  * library.
  *
- * <p>Rules for packages that do not exist yet allow an empty match, so the build stays green while
- * the service grows task by task. When a package gets its first class, remove {@code allowEmptyShould}
- * from its rule so that a rename cannot silently switch the rule off.
+ * <p>Every package now has classes, so no rule allows an empty match: a rename cannot silently switch a rule off.
  */
 @AnalyzeClasses(packages = ArchitectureTest.BASE, importOptions = ImportOption.DoNotIncludeTests.class)
 class ArchitectureTest {
@@ -35,7 +33,6 @@ class ArchitectureTest {
             .should()
             .onlyDependOnClassesThat()
             .resideInAnyPackage("java..", DOMAIN, CONTRACTS)
-            .allowEmptyShould(true)
             .because("the domain stays plain Java so its rules can be tested without a framework");
 
     @ArchTest
@@ -44,8 +41,7 @@ class ArchitectureTest {
             .resideInAPackage(DOMAIN)
             .should()
             .dependOnClassesThat()
-            .resideInAPackage("org.springframework..")
-            .allowEmptyShould(true);
+            .resideInAPackage("org.springframework..");
 
     @ArchTest
     static final ArchRule domainDoesNotDependOnInfraApiOrApp = noClasses()
@@ -53,8 +49,7 @@ class ArchitectureTest {
             .resideInAPackage(DOMAIN)
             .should()
             .dependOnClassesThat()
-            .resideInAnyPackage(INFRA, API, APP)
-            .allowEmptyShould(true);
+            .resideInAnyPackage(INFRA, API, APP);
 
     @ArchTest
     static final ArchRule apiDoesNotDependOnInfra = noClasses()
@@ -62,8 +57,7 @@ class ArchitectureTest {
             .resideInAPackage(API)
             .should()
             .dependOnClassesThat()
-            .resideInAPackage(INFRA)
-            .allowEmptyShould(true);
+            .resideInAPackage(INFRA);
 
     @ArchTest
     static final ArchRule serviceDoesNotTouchOtherServices = noClasses()
@@ -75,12 +69,11 @@ class ArchitectureTest {
                     "com.siddheshfulawade.payflow.wallet..",
                     "com.siddheshfulawade.payflow.risk..",
                     "com.siddheshfulawade.payflow.recon..")
-            .allowEmptyShould(true)
             .because("services talk through messages and HTTP, never through the classes of another service");
 
     @ArchTest
     static final ArchRule packagesAreFreeOfCycles =
-            slices().matching(BASE + ".(*)..").should().beFreeOfCycles().allowEmptyShould(true);
+            slices().matching(BASE + ".(*)..").should().beFreeOfCycles();
 
     // TODO-ME: add a rule `moneyIsNeverFloatingPoint`: no field of type double, float, Double or Float in DOMAIN
     // (CLAUDE.md: money is long minor units). Hint: noFields().that().areDeclaredInClassesThat()
