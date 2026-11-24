@@ -65,12 +65,12 @@ leaves the payer until capture, so compensation is always a hold release.
 | Step | Command (payment → X)                                    | Success reply   | Failure reply                                         | On failure                  |
 | ---- | -------------------------------------------------------- | --------------- | ----------------------------------------------------- | --------------------------- |
 | 1    | `ReserveFunds` → wallet                                  | `FundsReserved` | `FundsRejected` (insufficient, wallet frozen/unknown) | → `REJECTED`                |
-| 2    | `CheckRisk` → risk                                       | `RiskApproved`  | `RiskRejected` (rule id)                              | `ReleaseFunds` → `REFUNDED` |
-| 3    | `CaptureFunds` → wallet (debit payer hold, credit payee) | `FundsCaptured` | `CaptureFailed` (payee frozen/closed)                 | `ReleaseFunds` → `REFUNDED` |
+| 2    | `CheckRisk` → risk                                       | `RiskApproved`  | `RiskRejected` (rule id)                              | `ReleaseFunds` → `REVERSED` |
+| 3    | `CaptureFunds` → wallet (debit payer hold, credit payee) | `FundsCaptured` | `CaptureFailed` (payee frozen/closed)                 | `ReleaseFunds` → `REVERSED` |
 
-Payment states: `RECEIVED → RESERVING → RISK_CHECKING → CAPTURING → COMPLETED`, plus `RELEASING → REFUNDED`,
-and `REJECTED`. **Terminal: COMPLETED, REFUNDED, REJECTED.** `REFUNDED` means the held funds were returned to the
-payer's available balance (in card terms, an authorisation reversal).
+Payment states: `RECEIVED → RESERVING → RISK_CHECKING → CAPTURING → COMPLETED`, plus `RELEASING → REVERSED`,
+and `REJECTED`. **Terminal: COMPLETED, REVERSED, REJECTED.** `REVERSED` means the held funds were returned to the
+payer's available balance (in card terms, an authorisation reversal; a refund would return captured money).
 
 Wallet money model per wallet: `available` and `held` (both `long`, `CHECK >= 0`). Reserve moves `amount` from
 available to held; release moves it back; capture removes it from the payer's held and adds it to the payee's
@@ -84,7 +84,7 @@ Timeouts: each step sets `deadline_at` (step 1 and 3: 10 s; step 2: 5 s; configu
 claims overdue payments with `FOR UPDATE SKIP LOCKED` and re-sends the current command (safe: idempotent) up to
 3 times with backoff; after that it compensates (`ReleaseFunds`), and a release is retried until it succeeds.
 Release and capture never time out into a terminal state without the wallet's confirmation, so a payment can't end
-`REFUNDED` while money is still held.
+`REVERSED` while money is still held.
 
 ## 5. Requirements (EARS)
 
@@ -103,7 +103,7 @@ API and security
 Saga
 
 - REQ-PF-010 The orchestrator shall drive each payment through §4 and end it in exactly one terminal state.
-- REQ-PF-011 When risk rejects or capture fails, the orchestrator shall release the hold and end `REFUNDED`.
+- REQ-PF-011 When risk rejects or capture fails, the orchestrator shall release the hold and end `REVERSED`.
 - REQ-PF-012 When a step's reply is overdue, the sweeper shall re-send the command up to 3 times, then compensate.
 - REQ-PF-013 Late or duplicate replies shall not change a payment that has moved past that step.
 - REQ-PF-014 State changes use optimistic locking (`version`); two instances of payment-service shall never both
@@ -163,7 +163,7 @@ step_attempts, deadline_at, version, created_at, updated_at, unique(client_id, i
 | Chaos       | system-tests                                                                  | C1 kill wallet-service mid-batch and restart · C2 restart Kafka broker · C3 kill one risk member · C4 pause payment-service past deadlines · C5 client retries every request (same key) · C6 two payment-service instances |
 
 Invariants checked after every system and chaos test: Σ(available + held) unchanged; Σ held = 0; every payment
-terminal; each `COMPLETED` has exactly one capture (payer debit + payee credit); each `REFUNDED`/`REJECTED` moved
+terminal; each `COMPLETED` has exactly one capture (payer debit + payee credit); each `REVERSED`/`REJECTED` moved
 no money; payments created = distinct idempotency keys; reconciliation of the run reports only `MATCHED`.
 
 CI: GitHub Actions `verify` on Ubuntu and Windows × JDK 21 and 25 (unit tests; the Testcontainers tests are tagged
@@ -198,7 +198,7 @@ size 10,000 → Windows CI for `verify`. **Never cut**: outbox/inbox, compensati
 
 ## 9. Resume lines this spec makes true (check each at PF-12)
 
-3 microservices over Kafka with an orchestrated saga and automatic refunds · chaos tests that kill services and the
-broker: every payment COMPLETED or REFUNDED, no money lost or charged twice · transactional outbox and idempotent
+3 microservices over Kafka with an orchestrated saga and automatic reversals · chaos tests that kill services and the
+broker: every payment COMPLETED or REVERSED, no money lost or charged twice · transactional outbox and idempotent
 consumers, saga timeouts and a recovery sweeper · Hazelcast velocity limits with entry processors · OAuth 2.0
 resource servers validating Keycloak JWTs with roles · Spring Batch end-of-day reconciliation (add the measured numbers).

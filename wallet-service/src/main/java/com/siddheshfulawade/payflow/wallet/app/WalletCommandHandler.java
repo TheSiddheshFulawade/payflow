@@ -100,7 +100,7 @@ public class WalletCommandHandler {
     private Reply release(ReleaseFunds command) {
         UUID payment = command.paymentId();
         // No reserve yet: leave a tombstone, so a ReserveFunds that arrives later is rejected and the payment cannot
-        // end REFUNDED with money still held.
+        // end REVERSED with money still held.
         if (holds.insertIfAbsent(payment, command.payer(), command.amount(), HoldState.RELEASED)) {
             return new FundsReleased(payment);
         }

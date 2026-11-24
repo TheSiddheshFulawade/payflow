@@ -188,12 +188,12 @@ class SagaStateMachineTest {
     }
 
     @Test
-    @DisplayName("REQ-PF-010 exactly COMPLETED, REFUNDED and REJECTED are terminal")
+    @DisplayName("REQ-PF-010 exactly COMPLETED, REVERSED and REJECTED are terminal")
     void terminalStates() {
         List<PaymentState> terminal =
                 Stream.of(PaymentState.values()).filter(PaymentState::terminal).toList();
 
         assertThat(terminal)
-                .containsExactlyInAnyOrder(PaymentState.COMPLETED, PaymentState.REFUNDED, PaymentState.REJECTED);
+                .containsExactlyInAnyOrder(PaymentState.COMPLETED, PaymentState.REVERSED, PaymentState.REJECTED);
     }
 }

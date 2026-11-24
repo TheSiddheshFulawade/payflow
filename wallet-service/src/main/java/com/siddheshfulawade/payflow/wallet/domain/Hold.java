@@ -44,7 +44,7 @@ public record Hold(UUID paymentId, String payer, long amount, HoldState state, R
         return switch (state) {
             case RESERVED -> Optional.empty();
             case RELEASED, REJECTED -> Optional.of(new FundsReleased(paymentId));
-            // the truth: the payee has the money. FundsReleased here would end the payment REFUNDED without a refund.
+            // the truth: the payee has the money. FundsReleased would end the payment REVERSED though the payee has it.
             case CAPTURED -> Optional.of(new FundsCaptured(paymentId));
         };
     }

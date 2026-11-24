@@ -20,7 +20,7 @@ public record StepDeadlines(Duration reserve, Duration risk, Duration capture) {
             case RISK_CHECKING -> Optional.of(risk);
             case CAPTURING -> Optional.of(capture);
             case RELEASING -> throw new IllegalStateException("compensation arrives with PF-06");
-            case RECEIVED, COMPLETED, REFUNDED, REJECTED -> Optional.empty();
+            case RECEIVED, COMPLETED, REVERSED, REJECTED -> Optional.empty();
         };
     }
 
