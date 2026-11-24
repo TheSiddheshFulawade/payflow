@@ -180,7 +180,7 @@ and run on Ubuntu only) and `system` on Ubuntu (chaos tests, on every PR to main
       ops seeding API (REQ-PF-030, 021)
 - [x] PF-04 risk-service: rules, Hazelcast 2-member velocity with `EntryProcessor`, daily totals, idempotent
       decisions (REQ-PF-031, 032)
-- [ ] PF-05 payment-service API and saga happy path: validation, `Idempotency-Key`, state machine, outbox commands,
+- [x] PF-05 payment-service API and saga happy path: validation, `Idempotency-Key`, state machine, outbox commands,
       reply handling, optimistic locking (REQ-PF-001, 002, 004, 010, 014)
 - [ ] PF-06 Compensation, timeouts and sweeper; jqwik state-machine properties (REQ-PF-011 to 013)
 - [ ] PF-07 Security: resource servers in all three services, realm roles, owner check, problem details for 401/403,

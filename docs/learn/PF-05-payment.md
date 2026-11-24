@@ -3,10 +3,9 @@
 Code: `payment-service/src/main/java/com/siddheshfulawade/payflow/payment/`. Requirements: REQ-PF-001, 002, 010, 013, 014,
 020 and 021 in SPEC.md.
 Status of the tests: the local gate without Docker (`mvnw.cmd verify`) is green. The tests that need Docker
-(`-Pit`: real PostgreSQL and Kafka, for example `ReplyConcurrencyTest` and `PaymentApiIntegrationTest`) have not been
-run locally. They run only in CI, and that run was still in progress when this note was written. Until it is green,
-treat the database and concurrency behaviour below as designed and unit-tested, not yet proven. 1 test is skipped on
-purpose (the TODO-ME).
+(`-Pit`: real PostgreSQL and Kafka, for example `ReplyConcurrencyTest` and `PaymentApiIntegrationTest`) are green in CI
+`integration` on `9b29c45`: 360 payment-service tests, coverage gate met. They have not been run locally. 1 test is
+skipped on purpose (the TODO-ME).
 
 ## What the code does, in plain words
 
