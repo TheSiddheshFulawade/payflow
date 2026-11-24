@@ -27,6 +27,12 @@ spring:
       enabled: false
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+  task:
+    scheduling:
+      pool:
+        # one thread each for outbox relay, sweeper and outbox cleaner: the default single thread would let a relay
+        # that waits for Kafka (up to 35 s) stop the sweeper, and overdue payments would wait for the broker
+        size: 3
 
 server:
   # no authentication until PF-07, so loopback only; the container sets PAYMENT_BIND=0.0.0.0

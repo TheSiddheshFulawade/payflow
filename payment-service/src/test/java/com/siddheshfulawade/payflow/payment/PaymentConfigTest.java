@@ -100,6 +100,13 @@ class PaymentConfigTest {
     }
 
     @Test
+    @DisplayName("REQ-PF-012 three scheduler threads: a relay blocked on Kafka must not stop the sweeper")
+    void schedulerHasThreeThreads() throws IOException {
+        assertThat(environment(Map.of()).getProperty("spring.task.scheduling.pool.size"))
+                .isEqualTo("3");
+    }
+
+    @Test
     @DisplayName("REQ-PF-010 the service listens on 8081")
     void port() throws IOException {
         assertThat(environment(Map.of()).getProperty("server.port")).isEqualTo("8081");

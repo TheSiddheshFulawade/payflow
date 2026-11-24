@@ -33,8 +33,8 @@ import org.springframework.transaction.annotation.Transactional;
  *
  * <p>The velocity check is a network call inside the database transaction, on purpose. Counting before the commit
  * means an unknown count approves nothing: the call throws (fail closed). Counting for a transaction that then rolls
- * back is harmless: the window holds distinct payment ids, so the retry finds its own slot and pays nothing. The call is
- * bounded (see HazelcastVelocityCounter), so the row locks are not held for long.
+ * back is harmless: the window holds distinct payment ids, so the next check of the payment finds its own slot and pays
+ * nothing. The call is bounded to 1 s (see HazelcastVelocityCounter), so the row locks are not held for long.
  *
  * <p>Accepted: a lost count can approve more than 5 payments in a window (split-brain, all members restarted, or an
  * owner lost before its backup caught up). Velocity is a risk control; the daily total and the decision stay exact.
@@ -47,7 +47,8 @@ import org.springframework.transaction.annotation.Transactional;
  *       is never redelivered, the slot expires with the window: at worst one payment too few, never one too many
  *   <li>crash after the commit, before the offset commit: redelivered; the inbox re-sends the stored reply
  *   <li>crash before or after the reply is published: the reply is in the outbox; the relay sends it (again)
- *   <li>velocity cluster unreachable or slow: the call throws, everything rolls back and is retried (fail closed)
+ *   <li>velocity cluster unreachable or slow: the call throws and everything rolls back (fail closed). The record is
+ *       parked after one delivery, so it holds the partition for 1 s at most; the payment's sweeper re-sends the check
  *   <li>two copies of a check at once: the second waits on the decision row, then answers from the committed decision
  *   <li>two payments of one payer at once: the second waits on the daily total, then sees the first one's amount
  * </ul>

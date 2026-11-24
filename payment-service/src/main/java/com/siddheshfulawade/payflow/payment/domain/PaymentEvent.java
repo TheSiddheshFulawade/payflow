@@ -7,8 +7,8 @@ import java.util.UUID;
  * Audit of one transition.
  *
  * @param from null for the first event
- * @param messageId the reply that caused it; null when the API request did
- * @param attempt that reply's attempt; null when the API request caused it
+ * @param messageId the reply that caused it; null when the API request or a timeout did
+ * @param attempt that reply's attempt; null when no reply caused it
  * @param reason why the payment failed; null for a successful step
  */
 public record PaymentEvent(

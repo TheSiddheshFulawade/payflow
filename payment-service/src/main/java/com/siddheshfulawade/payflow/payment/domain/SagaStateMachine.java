@@ -3,29 +3,33 @@ package com.siddheshfulawade.payflow.payment.domain;
 import com.siddheshfulawade.payflow.contracts.CaptureFailed;
 import com.siddheshfulawade.payflow.contracts.CaptureFunds;
 import com.siddheshfulawade.payflow.contracts.CheckRisk;
+import com.siddheshfulawade.payflow.contracts.Command;
 import com.siddheshfulawade.payflow.contracts.FundsCaptured;
 import com.siddheshfulawade.payflow.contracts.FundsRejected;
 import com.siddheshfulawade.payflow.contracts.FundsReleased;
 import com.siddheshfulawade.payflow.contracts.FundsReserved;
+import com.siddheshfulawade.payflow.contracts.ReleaseFunds;
 import com.siddheshfulawade.payflow.contracts.Reply;
 import com.siddheshfulawade.payflow.contracts.ReserveFunds;
 import com.siddheshfulawade.payflow.contracts.RiskApproved;
 import com.siddheshfulawade.payflow.contracts.RiskRejected;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * The saga table of SPEC section 4, as pure functions.
  *
  * <p>Commands are built from the payment row only, never from a reply: a wrong or forged reply can't change who pays
- * whom how much.
+ * whom how much, and a re-sent command is the same as the first one.
  */
 public final class SagaStateMachine {
 
+    /** Why a payment that got no reply was released. */
+    static final String TIMEOUT = "TIMEOUT";
+
     /** The first step of a RECEIVED payment. */
     public static Transition start(Payment payment) {
-        return Transition.step(
-                PaymentState.RESERVING,
-                new ReserveFunds(payment.id(), payment.payer(), payment.amount(), payment.currency()));
+        return Transition.step(PaymentState.RESERVING, reserveFunds(payment));
     }
 
     /**
@@ -53,27 +57,67 @@ public final class SagaStateMachine {
                         PaymentState.RISK_CHECKING,
                         payment,
                         Transition.step(PaymentState.CAPTURING, captureFunds(payment)));
+            case RiskRejected r -> onlyIn(PaymentState.RISK_CHECKING, payment, release(payment, r.rule()));
+            // While RELEASING it means "already captured": the capture's reply was lost or late and the payee has the
+            // money, so the payment is COMPLETED, never REVERSED. The attempt numbers of CAPTURING and RELEASING
+            // overlap, so a late reply to the capture itself may also match. It says the same: the money moved.
             case FundsCaptured r ->
-                onlyIn(PaymentState.CAPTURING, payment, Transition.end(PaymentState.COMPLETED, null));
-            // compensation arrives with PF-06; until then see needsCompensation
-            case RiskRejected r -> Optional.empty();
-            case CaptureFailed r -> Optional.empty();
-            case FundsReleased r -> Optional.empty();
+                onlyIn(
+                        Set.of(PaymentState.CAPTURING, PaymentState.RELEASING),
+                        payment,
+                        Transition.end(PaymentState.COMPLETED, null));
+            // the wallet refused the capture and kept the hold
+            case CaptureFailed r -> onlyIn(PaymentState.CAPTURING, payment, release(payment, r.reason()));
+            // only the wallet's word ends a release: REVERSED is never reached while money is held
+            case FundsReleased r ->
+                onlyIn(PaymentState.RELEASING, payment, Transition.end(PaymentState.REVERSED, null));
         };
     }
 
     /**
-     * Whether this reply means "release the hold". Until PF-06 {@link #on} has no transition for it, but the caller
-     * must not ignore it like a late reply: the payer's money is held.
+     * What to do with a payment whose deadline passed: re-send its command at most {@code maxResends} times (a step's
+     * first send is attempt 1), then release the hold.
+     *
+     * <p>A release is re-sent forever. Giving it up would end the payment, or leave it stuck, with money still held.
+     *
+     * @throws IllegalStateException if the payment waits for nothing
      */
-    public static boolean needsCompensation(Payment payment, Reply reply, int replyAttempt) {
-        boolean failedStep = (payment.state() == PaymentState.RISK_CHECKING && reply instanceof RiskRejected)
-                || (payment.state() == PaymentState.CAPTURING && reply instanceof CaptureFailed);
-        return failedStep && replyAttempt == payment.stepAttempts();
+    public static Overdue overdue(Payment payment, int maxResends) {
+        Command command = currentCommand(payment);
+        if (payment.state() == PaymentState.RELEASING || payment.stepAttempts() <= maxResends) {
+            return new Overdue.Resend(command);
+        }
+        return new Overdue.Compensate(release(payment, TIMEOUT));
+    }
+
+    /** The command whose reply the payment waits for. */
+    private static Command currentCommand(Payment payment) {
+        return switch (payment.state()) {
+            case RESERVING -> reserveFunds(payment);
+            case RISK_CHECKING -> checkRisk(payment);
+            case CAPTURING -> captureFunds(payment);
+            case RELEASING -> releaseFunds(payment);
+            case RECEIVED, COMPLETED, REVERSED, REJECTED ->
+                throw new IllegalStateException(
+                        "payment " + payment.id() + " is " + payment.state() + " and waits for no reply");
+        };
+    }
+
+    /** Compensation. Safe even if nothing is held: the wallet answers, and refuses a reserve that arrives later. */
+    private static Transition release(Payment payment, String reason) {
+        return new Transition(PaymentState.RELEASING, Optional.of(releaseFunds(payment)), reason);
     }
 
     private static Optional<Transition> onlyIn(PaymentState expected, Payment payment, Transition transition) {
-        return payment.state() == expected ? Optional.of(transition) : Optional.empty();
+        return onlyIn(Set.of(expected), payment, transition);
+    }
+
+    private static Optional<Transition> onlyIn(Set<PaymentState> expected, Payment payment, Transition transition) {
+        return expected.contains(payment.state()) ? Optional.of(transition) : Optional.empty();
+    }
+
+    private static ReserveFunds reserveFunds(Payment p) {
+        return new ReserveFunds(p.id(), p.payer(), p.amount(), p.currency());
     }
 
     private static CheckRisk checkRisk(Payment p) {
@@ -82,6 +126,10 @@ public final class SagaStateMachine {
 
     private static CaptureFunds captureFunds(Payment p) {
         return new CaptureFunds(p.id(), p.payer(), p.payee(), p.amount(), p.currency());
+    }
+
+    private static ReleaseFunds releaseFunds(Payment p) {
+        return new ReleaseFunds(p.id(), p.payer(), p.amount());
     }
 
     private SagaStateMachine() {}

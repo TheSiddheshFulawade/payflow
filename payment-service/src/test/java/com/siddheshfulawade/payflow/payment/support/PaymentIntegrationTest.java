@@ -6,15 +6,18 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.siddheshfulawade.payflow.contracts.Envelope;
 import com.siddheshfulawade.payflow.contracts.FundsCaptured;
 import com.siddheshfulawade.payflow.contracts.FundsRejected;
+import com.siddheshfulawade.payflow.contracts.FundsReleased;
 import com.siddheshfulawade.payflow.contracts.FundsReserved;
 import com.siddheshfulawade.payflow.contracts.MessageCodec;
 import com.siddheshfulawade.payflow.contracts.PoisonMessageException;
 import com.siddheshfulawade.payflow.contracts.Reply;
 import com.siddheshfulawade.payflow.contracts.RiskApproved;
+import com.siddheshfulawade.payflow.contracts.RiskRejected;
 import com.siddheshfulawade.payflow.messaging.IdempotentConsumer;
 import com.siddheshfulawade.payflow.payment.PaymentServiceApplication;
 import com.siddheshfulawade.payflow.payment.app.NewPayment;
 import com.siddheshfulawade.payflow.payment.app.PaymentService;
+import com.siddheshfulawade.payflow.payment.app.PaymentSweeper;
 import com.siddheshfulawade.payflow.payment.app.ReplyHandler;
 import com.siddheshfulawade.payflow.payment.domain.Payment;
 import com.siddheshfulawade.payflow.payment.domain.PaymentState;
@@ -41,15 +44,21 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
  * Shared context for the payment integration tests: real PostgreSQL and Kafka, the relay switched off (the outbox
  * rows stay readable). Replies reach the handler the way production does it:
  * {@code IdempotentConsumer.handle(envelope, replyHandler::handle)}.
+ *
+ * <p>The sweeper's schedule is off (a test calls {@code sweeper.sweep()} itself) and the clock is a {@link MutableClock}
+ * (system time until a test sets it), so a deadline passes by moving the clock, never by waiting. A subclass that wants
+ * the schedule overrides {@code payflow.payment.sweeper.enabled} with its own @TestPropertySource.
  */
 @Tag("it")
-@SpringBootTest(classes = PaymentServiceApplication.class)
+@SpringBootTest(classes = {PaymentServiceApplication.class, PaymentTestBeans.class})
+@TestPropertySource(properties = "payflow.payment.sweeper.enabled=false")
 @AutoConfigureMockMvc
 public abstract class PaymentIntegrationTest {
 
@@ -81,12 +90,19 @@ public abstract class PaymentIntegrationTest {
     @Autowired
     protected PaymentService payments;
 
+    @Autowired
+    protected PaymentSweeper sweeper;
+
+    @Autowired
+    protected MutableClock clock;
+
     protected final MessageCodec codec = new MessageCodec();
     protected final KafkaProbe kafka = new KafkaProbe();
 
     @BeforeEach
     void cleanState() {
         dropFailureTriggers();
+        clock.useSystemTime();
         jdbc.execute("truncate table outbox, inbox, payment_event, payment");
     }
 
@@ -170,7 +186,10 @@ public abstract class PaymentIntegrationTest {
             case CAPTURING -> List.of(new FundsReserved(id), new RiskApproved(id));
             case COMPLETED -> List.of(new FundsReserved(id), new RiskApproved(id), new FundsCaptured(id));
             case REJECTED -> List.of(new FundsRejected(id, "INSUFFICIENT_FUNDS"));
-            default -> throw new IllegalArgumentException("not reachable in PF-05: " + target);
+            // compensation after a risk rejection (the capture-failure path is driven by the tests that need it)
+            case RELEASING -> List.of(new FundsReserved(id), new RiskRejected(id, "VELOCITY"));
+            case REVERSED -> List.of(new FundsReserved(id), new RiskRejected(id, "VELOCITY"), new FundsReleased(id));
+            default -> throw new IllegalArgumentException("not reachable by replies: " + target);
         };
         replies.forEach(r -> deliver(reply(r)));
         assertThat(state(id)).as("state after advancing").isEqualTo(target.name());
@@ -221,6 +240,18 @@ public abstract class PaymentIntegrationTest {
                 id);
     }
 
+    /** The failure reason stored on the event that moved the payment into {@code toState}; null for none. */
+    protected String eventReason(UUID id, String toState) {
+        return jdbc.queryForObject(
+                "select reason from payment_event where payment_id = ? and to_state = ?", String.class, id, toState);
+    }
+
+    /** The reply's message id stored on that event; null when no reply caused it (a timeout). */
+    protected UUID eventMessageId(UUID id, String toState) {
+        return jdbc.queryForObject(
+                "select message_id from payment_event where payment_id = ? and to_state = ?", UUID.class, id, toState);
+    }
+
     protected long eventCount(UUID id) {
         return count("select count(*) from payment_event where payment_id = ?", id);
     }
@@ -235,6 +266,11 @@ public abstract class PaymentIntegrationTest {
                 .stream()
                 .map(codec::decode)
                 .toList();
+    }
+
+    /** The outbox rows of one command type for this payment, oldest first. */
+    protected List<Envelope> commands(UUID id, Class<?> type) {
+        return outbox(id).stream().filter(e -> type.isInstance(e.payload())).toList();
     }
 
     protected long outboxCount(UUID id) {
@@ -277,9 +313,18 @@ public abstract class PaymentIntegrationTest {
                 + "') execute function pf_fail_insert()");
     }
 
+    /** Appending any message of this one payment fails: a "broken payment" next to healthy ones. */
+    protected void makeOutboxInsertFailFor(UUID paymentId) {
+        jdbc.execute("create or replace function pf_fail_insert_for() returns trigger language plpgsql as"
+                + " $$ begin raise exception 'injected outbox failure'; end $$");
+        jdbc.execute("create trigger pf_outbox_fail_for before insert on outbox for each row when (new.message_key = '"
+                + paymentId + "') execute function pf_fail_insert_for()");
+    }
+
     protected void dropFailureTriggers() {
         jdbc.execute("drop trigger if exists pf_stale on payment");
         jdbc.execute("drop trigger if exists pf_outbox_fail on outbox");
+        jdbc.execute("drop trigger if exists pf_outbox_fail_for on outbox");
     }
 
     // ---- concurrency ----

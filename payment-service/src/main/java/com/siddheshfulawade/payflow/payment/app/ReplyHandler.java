@@ -17,7 +17,8 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * The effect of a reply: moves the payment one step and queues the next command (REQ-PF-010, 013, 014).
+ * The effect of a reply: moves the payment one step, forward or into its release, and queues the next command
+ * (REQ-PF-010, 011, 013, 014).
  *
  * <p>Failures considered:
  *
@@ -28,9 +29,9 @@ import org.springframework.transaction.annotation.Transactional;
  *   <li>duplicate (same message id): the inbox drops it; nothing is re-sent, see {@link #handle}
  *   <li>the same reply re-sent under a new message id, a late reply, another attempt, a finished payment: no
  *       transition exists, so it is ignored; its inbox row stays
- *   <li>two instances on one payment: both may read the same version, one update wins, the other finds 0 rows, rolls
- *       back completely and decides again on the new state when it is redelivered
- *   <li>lost reply: the step's deadline passes; the sweeper (PF-06) re-sends the command
+ *   <li>two instances on one payment, or the sweeper: both may read the same version, one update wins, the other finds
+ *       0 rows, rolls back completely and decides again on the new state when it is redelivered
+ *   <li>lost or parked reply: the step's deadline passes; the {@link PaymentSweeper} re-sends the command
  *   <li>the same Idempotency-Key concurrently: decided by {@link PaymentService}; replies only ever see one payment
  * </ul>
  */
@@ -71,9 +72,6 @@ public class ReplyHandler {
         Optional<Transition> transition = SagaStateMachine.on(payment, reply, message.attempt());
         if (transition.isPresent()) {
             transitions.write(payment, transition.get(), message);
-        } else if (SagaStateMachine.needsCompensation(payment, reply, message.attempt())) {
-            // not ignored, money is held: retried, then parked on the dead-letter topic, where it is visible
-            throw new IllegalStateException("compensation arrives with PF-06");
         } else {
             logIgnored(payment, message);
         }

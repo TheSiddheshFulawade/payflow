@@ -9,7 +9,7 @@ public interface VelocityCounter {
     /**
      * Counts the payment if the payer is within the limit. Asking again for a counted payment is true and free.
      *
-     * @throws RuntimeException if the count is unknown; the caller must not approve
+     * @throws VelocityUnavailableException if the count is unknown; the caller must not approve
      */
     boolean allow(String payer, UUID paymentId, Instant now);
 }

@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.siddheshfulawade.payflow.contracts.MessageCodec;
 import com.siddheshfulawade.payflow.messaging.IdempotentConsumer;
 import com.siddheshfulawade.payflow.payment.app.PaymentService;
+import com.siddheshfulawade.payflow.payment.app.PaymentSweeper;
 import com.siddheshfulawade.payflow.payment.app.Payments;
 import com.siddheshfulawade.payflow.payment.app.ReplyHandler;
 import org.junit.jupiter.api.Test;
@@ -40,6 +41,9 @@ class PaymentServiceApplicationHealthTest {
 
     @MockitoBean
     ReplyHandler replyHandler;
+
+    @MockitoBean
+    PaymentSweeper paymentSweeper;
 
     @MockitoBean
     IdempotentConsumer idempotentConsumer;

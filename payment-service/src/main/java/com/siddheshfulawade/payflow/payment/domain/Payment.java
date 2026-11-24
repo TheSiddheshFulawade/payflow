@@ -10,7 +10,7 @@ import java.util.UUID;
  * @param amount minor units
  * @param stepAttempts attempt of the current step; only a reply with this attempt counts
  * @param deadlineAt when the current step is overdue; null in RECEIVED and in terminal states
- * @param version optimistic lock: grows by 1 with every transition (REQ-PF-014)
+ * @param version optimistic lock: grows by 1 with every transition and every re-send (REQ-PF-014)
  */
 public record Payment(
         UUID id,
@@ -69,6 +69,25 @@ public record Payment(
                 currency,
                 to,
                 to.terminal() ? stepAttempts : 1,
+                deadline,
+                version + 1,
+                createdAt,
+                now);
+    }
+
+    /** This payment in the same step, on the next attempt: replies to the earlier attempts no longer count. */
+    public Payment nextAttempt(Instant deadline, Instant now) {
+        return new Payment(
+                id,
+                clientId,
+                idempotencyKey,
+                requestHash,
+                payer,
+                payee,
+                amount,
+                currency,
+                state,
+                stepAttempts + 1,
                 deadline,
                 version + 1,
                 createdAt,
