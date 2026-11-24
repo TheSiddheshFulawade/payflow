@@ -51,6 +51,13 @@ class WalletConfigTest {
     }
 
     @Test
+    @DisplayName("REQ-PF-004 multipart parsing is off: no endpoint takes uploads, and a bad boundary must not reach it")
+    void multipartIsOff() throws IOException {
+        assertThat(environment(Map.of()).getProperty("spring.servlet.multipart.enabled"))
+                .isEqualTo("false");
+    }
+
+    @Test
     @DisplayName("REQ-PF-030 every pooled connection starts with a lock_timeout, so a stuck row lock ends in an error")
     void connectionsSetLockTimeout() throws IOException {
         assertThat(environment(Map.of()).getProperty("spring.datasource.hikari.connection-init-sql"))

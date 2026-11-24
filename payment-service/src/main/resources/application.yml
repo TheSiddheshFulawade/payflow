@@ -1,9 +1,40 @@
 spring:
   application:
     name: payment-service
+  # Defaults match deploy/compose.yaml. The password has no default on purpose: demo secrets live in deploy/ only.
+  datasource:
+    # logServerErrorDetail=false: row values stay out of logs and the dead-letter topic
+    url: ${PAYMENT_DB_URL:jdbc:postgresql://localhost:5432/payment?logServerErrorDetail=false}
+    username: ${PAYMENT_DB_USER:payment}
+    password: ${PAYMENT_DB_PASSWORD}
+    hikari:
+      # a stuck transaction must not block a partition forever: the lock wait ends in an error and the reply is retried
+      connection-init-sql: set lock_timeout = '5s'
+      # the same as in the default url, and still set when PAYMENT_DB_URL replaces that url
+      data-source-properties:
+        logServerErrorDetail: "false"
+  flyway:
+    # V1 (outbox, inbox) comes from messaging; this service's scripts start at V2.
+    locations: classpath:db/messaging,classpath:db/migration
+  mvc:
+    formcontent:
+      filter:
+        # Boot's form filter reads PUT/PATCH/DELETE bodies; BodyLimitFilter must decide on size before any read
+        enabled: false
+  servlet:
+    multipart:
+      # no endpoint takes uploads: multipart is an unsupported type (415), never a parser failure (500)
+      enabled: false
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
 
 server:
+  # no authentication until PF-07, so loopback only; the container sets PAYMENT_BIND=0.0.0.0
+  address: ${PAYMENT_BIND:127.0.0.1}
   port: 8081
+  http2:
+    # BodyLimitFilter relies on HTTP/1.1: a request with neither Content-Length nor Transfer-Encoding has no body
+    enabled: false
 
 management:
   endpoints:

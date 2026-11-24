@@ -21,6 +21,10 @@ spring:
       filter:
         # Boot's form filter reads PUT/PATCH/DELETE bodies; BodyLimitFilter must decide on size before any read
         enabled: false
+  servlet:
+    multipart:
+      # no endpoint takes uploads: multipart is an unsupported type (415), never a parser failure (500)
+      enabled: false
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
 
