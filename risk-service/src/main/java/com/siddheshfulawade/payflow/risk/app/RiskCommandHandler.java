@@ -32,9 +32,12 @@ import org.springframework.transaction.annotation.Transactional;
  * order, so checks never wait for each other in a circle.
  *
  * <p>The velocity check is a network call inside the database transaction, on purpose. Counting before the commit
- * means a count that is lost or unknown can only refuse: nothing is approved without it. Counting for a transaction
- * that then rolls back is harmless: the window holds distinct payment ids, so the retry finds its own slot and pays
- * nothing. The call is bounded (see HazelcastVelocityCounter), so the row locks are not held for long.
+ * means an unknown count approves nothing: the call throws (fail closed). Counting for a transaction that then rolls
+ * back is harmless: the window holds distinct payment ids, so the retry finds its own slot and pays nothing. The call is
+ * bounded (see HazelcastVelocityCounter), so the row locks are not held for long.
+ *
+ * <p>Accepted: a lost count can approve more than 5 payments in a window (split-brain, all members restarted, or an
+ * owner lost before its backup caught up). Velocity is a risk control; the daily total and the decision stay exact.
  *
  * <p>Failures considered:
  *

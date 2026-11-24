@@ -3,16 +3,27 @@ package com.siddheshfulawade.payflow.risk.infra;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.hazelcast.config.Config;
+import com.hazelcast.config.ServerSocketEndpointConfig;
 import com.hazelcast.core.Hazelcast;
 import com.hazelcast.core.HazelcastInstance;
+import com.hazelcast.instance.EndpointQualifier;
 import com.hazelcast.internal.serialization.Data;
 import com.hazelcast.internal.serialization.SerializationService;
 import com.hazelcast.spi.impl.SerializationServiceSupport;
+import com.hazelcast.spi.properties.ClusterProperty;
 import com.siddheshfulawade.payflow.risk.app.VelocityCounter;
 import com.siddheshfulawade.payflow.risk.domain.RiskLimits;
+import com.siddheshfulawade.payflow.risk.domain.VelocityWindow;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.Serializable;
+import java.io.InputStream;
+import java.net.InetSocketAddress;
 import java.net.ServerSocket;
+import java.net.Socket;
+import java.net.SocketException;
+import java.net.SocketTimeoutException;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -42,6 +53,7 @@ class HazelcastVelocityClusterTest {
     private static final Duration WAIT = Duration.ofSeconds(60);
     private static final RiskLimits LIMITS = RiskLimits.defaults();
 
+    private int[] ports;
     private HazelcastInstance memberA;
     private HazelcastInstance memberB;
     private VelocityCounter onA;
@@ -49,7 +61,7 @@ class HazelcastVelocityClusterTest {
 
     @BeforeEach
     void startTwoMembers() throws IOException {
-        int[] ports = freePorts();
+        ports = freePorts();
         String cluster = "risk-test-" + UUID.randomUUID();
         List<String> members = List.of("127.0.0.1:" + ports[0], "127.0.0.1:" + ports[1]);
         memberA = Hazelcast.newHazelcastInstance(
@@ -312,22 +324,113 @@ class HazelcastVelocityClusterTest {
 
     // ---- configuration of the members ----
 
+    /**
+     * The member port speaks the member protocol only (advanced network with a single MEMBER endpoint): no client,
+     * REST or memcache endpoint, so nothing can read or write the velocity map through it. Joining is configured on the
+     * advanced network config, because the plain network config is ignored once that is enabled.
+     */
+    private static void assertMemberOnlyNetwork(Config config, int port, String bindAddress, List<String> members) {
+        var advanced = config.getAdvancedNetworkConfig();
+        assertThat(advanced.isEnabled()).as("advanced network").isTrue();
+        assertThat(advanced.getEndpointConfigs())
+                .as("exactly one endpoint, the member one: no CLIENT, REST or MEMCACHE")
+                .containsOnlyKeys(EndpointQualifier.MEMBER);
+        var member = (ServerSocketEndpointConfig) advanced.getEndpointConfigs().get(EndpointQualifier.MEMBER);
+        assertThat(member.getPort()).as("member port").isEqualTo(port);
+        assertThat(member.isPortAutoIncrement())
+                .as("a taken port fails the start")
+                .isFalse();
+        assertThat(member.getInterfaces().isEnabled()).as("interfaces").isTrue();
+        assertThat(member.getInterfaces().getInterfaces()).containsExactly(bindAddress);
+
+        var join = advanced.getJoin();
+        assertThat(join.getMulticastConfig().isEnabled()).as("multicast").isFalse();
+        assertThat(join.getAutoDetectionConfig().isEnabled())
+                .as("auto-detection")
+                .isFalse();
+        assertThat(join.getTcpIpConfig().isEnabled()).as("tcp-ip").isTrue();
+        assertThat(join.getTcpIpConfig().getMembers()).containsExactlyElementsOf(members);
+    }
+
+    private static void assertLockedDownProperties(Config config) {
+        assertThat(config.getProperty("hazelcast.socket.bind.any"))
+                .as("bind.any")
+                .isEqualTo("false");
+        var effective = new com.hazelcast.spi.properties.HazelcastProperties(config);
+        assertThat(effective.getBoolean(ClusterProperty.SOCKET_BIND_ANY))
+                .as("effective bind any")
+                .isFalse();
+        assertThat(effective.getBoolean(ClusterProperty.SOCKET_SERVER_BIND_ANY))
+                .as("effective server bind any (the property that counts with advanced network)")
+                .isFalse();
+        assertThat(config.getProperty("hazelcast.phone.home.enabled"))
+                .as("phone home")
+                .isEqualTo("false");
+        assertThat(config.getProperty("hazelcast.shutdownhook.enabled"))
+                .as("shutdown hook")
+                .isEqualTo("false");
+        assertThat(config.getProperty("hazelcast.operation.fail.on.indeterminate.state"))
+                .as("an operation whose outcome is unknown fails instead of being guessed")
+                .isEqualTo("true");
+        assertThat(config.getJetConfig().isEnabled()).as("jet").isFalse();
+        var management = config.getManagementCenterConfig();
+        assertThat(management.isScriptingEnabled())
+                .as("management center scripting")
+                .isFalse();
+        assertThat(management.isConsoleEnabled())
+                .as("management center console")
+                .isFalse();
+        assertThat(management.isDataAccessEnabled())
+                .as("management center data access")
+                .isFalse();
+    }
+
     @Test
-    @DisplayName("REQ-PF-032 the members join by TCP-IP on loopback only: no multicast, no phone-home, no Jet")
+    @DisplayName("REQ-PF-032 a running member listens for members only, on loopback, joined by TCP-IP, nothing else on")
     void membersAreLockedDown() {
         var config = memberA.getConfig();
 
-        assertThat(config.getNetworkConfig().getJoin().getMulticastConfig().isEnabled())
-                .as("multicast")
-                .isFalse();
-        assertThat(config.getNetworkConfig().getJoin().getTcpIpConfig().isEnabled())
-                .as("tcp-ip")
-                .isTrue();
-        assertThat(config.getProperty("hazelcast.phone.home.enabled")).isEqualTo("false");
-        assertThat(config.getJetConfig().isEnabled()).as("jet").isFalse();
-        assertThat(config.getNetworkConfig().getInterfaces().isEnabled()).isTrue();
-        assertThat(config.getNetworkConfig().getInterfaces().getInterfaces()).containsExactly("127.0.0.1");
+        assertMemberOnlyNetwork(
+                config, ports[0], "127.0.0.1", List.of("127.0.0.1:" + ports[0], "127.0.0.1:" + ports[1]));
+        assertLockedDownProperties(config);
         assertThat(memberA.getCluster().getLocalMember().getAddress().getHost()).isEqualTo("127.0.0.1");
+        assertThat(memberA.getCluster().getLocalMember().getAddress().getPort()).isEqualTo(ports[0]);
+    }
+
+    @Test
+    @DisplayName("REQ-PF-032 a client-protocol connection to the member port is closed without a client handshake")
+    void clientProtocolIsRefusedOnTheMemberPort() throws IOException {
+        try (Socket socket = new Socket()) {
+            socket.connect(new InetSocketAddress("127.0.0.1", ports[0]), 5_000);
+            socket.setSoTimeout(250);
+            socket.getOutputStream().write("CP2".getBytes(StandardCharsets.US_ASCII)); // the client protocol header
+            socket.getOutputStream().flush();
+            ByteArrayOutputStream received = new ByteArrayOutputStream();
+
+            Awaitility.await("member closes a client-protocol connection")
+                    .atMost(Duration.ofSeconds(15))
+                    .pollInterval(Duration.ofMillis(100))
+                    .until(() -> readToEnd(socket.getInputStream(), received));
+
+            assertThat(received.toString(StandardCharsets.US_ASCII))
+                    .as("at most the unexpected-protocol marker, never a client handshake")
+                    .isIn("", "HZX");
+        }
+    }
+
+    /** True when the other side closed the connection; false when it is still open and silent. */
+    private static boolean readToEnd(InputStream in, ByteArrayOutputStream into) throws IOException {
+        try {
+            int b;
+            while ((b = in.read()) != -1) {
+                into.write(b);
+            }
+            return true;
+        } catch (SocketTimeoutException stillOpen) {
+            return false;
+        } catch (SocketException reset) {
+            return true;
+        }
     }
 
     @Test
@@ -361,10 +464,8 @@ class HazelcastVelocityClusterTest {
         var config = HazelcastConfigFactory.build(props, LIMITS);
 
         assertThat(config.getClusterName()).isEqualTo("my-cluster");
-        assertThat(config.getNetworkConfig().getPort()).isEqualTo(5999);
-        assertThat(config.getNetworkConfig().getJoin().getTcpIpConfig().getMembers())
-                .containsExactly("10.0.0.1:5999", "10.0.0.2:5999");
-        assertThat(config.getNetworkConfig().getInterfaces().getInterfaces()).containsExactly("10.0.0.1");
+        assertMemberOnlyNetwork(config, 5999, "10.0.0.1", List.of("10.0.0.1:5999", "10.0.0.2:5999"));
+        assertLockedDownProperties(config);
     }
 
     /** Outside every PayFlow package, Serializable, and not one of Hazelcast's built-in types. */
@@ -376,18 +477,34 @@ class HazelcastVelocityClusterTest {
 
         assertThatThrownBy(() -> serialization.toObject(foreign))
                 .as("the filter blocks classes that are not whitelisted")
-                .isInstanceOf(RuntimeException.class);
+                .isInstanceOf(RuntimeException.class)
+                .hasRootCauseInstanceOf(SecurityException.class);
     }
 
     @Test
-    @DisplayName("REQ-PF-032 the filter is not too tight: a PayFlow class still round-trips")
+    @DisplayName("REQ-PF-032 the filter is not too tight: a non-empty VelocityWindow round-trips through the member")
     void payflowClassesStillDeserialise() {
         SerializationService serialization = ((SerializationServiceSupport) memberA).getSerializationService();
-        Data data = serialization.toData(new Probe(42));
+        VelocityWindow window = VelocityWindow.empty()
+                .add(id(), NOW.toEpochMilli(), 5, 60_000)
+                .window()
+                .add(id(), NOW.toEpochMilli() + 1, 5, 60_000)
+                .window();
+        assertThat(window.size()).as("a real window with entries").isEqualTo(2);
 
-        assertThat(serialization.<Probe>toObject(data)).isEqualTo(new Probe(42));
+        Data data = serialization.toData(window);
+
+        assertThat(serialization.<VelocityWindow>toObject(data)).isEqualTo(window);
     }
 
-    /** Lives in a PayFlow package, so the whitelist covers it. */
-    record Probe(int value) implements Serializable {}
+    @Test
+    @DisplayName("REQ-PF-032 the filter is not too tight: a VelocityEntryProcessor round-trips through the member")
+    void entryProcessorStillDeserialises() {
+        SerializationService serialization = ((SerializationServiceSupport) memberA).getSerializationService();
+        var processor = new VelocityEntryProcessor(id(), NOW.toEpochMilli(), 5, 60_000);
+
+        Data data = serialization.toData(processor);
+
+        assertThat(serialization.<VelocityEntryProcessor>toObject(data)).isEqualTo(processor);
+    }
 }

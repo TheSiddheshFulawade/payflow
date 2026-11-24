@@ -26,6 +26,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -145,16 +146,19 @@ public abstract class RiskIntegrationTest {
 
     /**
      * A poison command is thrown out of the consumer and leaves no trace: no inbox row, no reply in the outbox, and
-     * the message names no payer or amount.
+     * the message names none of the given values. At least one value is required by signature: checking "nothing" would
+     * prove nothing (and AssertJ refuses an empty list).
      */
-    protected void assertPoison(Envelope command, String... mustNotAppear) {
+    protected void assertPoison(Envelope command, String mustNotAppear, String... moreMustNotAppear) {
+        String[] forbidden = Stream.concat(Stream.of(mustNotAppear), Stream.of(moreMustNotAppear))
+                .toArray(String[]::new);
         long inbox = jdbc.queryForObject("select count(*) from inbox", Long.class);
         long outbox = jdbc.queryForObject("select count(*) from outbox", Long.class);
 
         assertThatThrownBy(() -> consumer.handle(command, handler::handle))
                 .isInstanceOf(PoisonMessageException.class)
                 .message()
-                .doesNotContain(mustNotAppear);
+                .doesNotContain(forbidden);
 
         assertThat(jdbc.queryForObject("select count(*) from inbox", Long.class))
                 .as("inbox rolled back")

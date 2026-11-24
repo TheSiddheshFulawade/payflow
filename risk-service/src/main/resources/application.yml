@@ -10,6 +10,9 @@ spring:
     hikari:
       # a stuck transaction must not block a partition forever: the lock wait ends in an error and the command is retried
       connection-init-sql: set lock_timeout = '5s'
+      # the same as in the default url, and still set when RISK_DB_URL replaces that url
+      data-source-properties:
+        logServerErrorDetail: "false"
   flyway:
     # V1 (outbox, inbox) comes from messaging; this service's scripts start at V2.
     locations: classpath:db/messaging,classpath:db/migration

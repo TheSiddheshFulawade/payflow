@@ -147,7 +147,8 @@ step_attempts, deadline_at, version, created_at, updated_at, unique(client_id, i
   `payment_event` (audit of transitions), `outbox`, `inbox`.
 - wallet DB: `wallet(id pk, owner_sub, available, held, status, version, CHECK(available>=0), CHECK(held>=0))`,
   `hold(payment_id pk, payer, amount, state, reason, payee)`, `ledger_entry` (every movement, for statements), `outbox`, `inbox`.
-- risk DB: `risk_decision(payment_id pk, decision, rule, decided_at)`, `daily_total(payer, date, amount)`, `outbox`, `inbox`.
+- risk DB: `risk_decision(payment_id pk, payer, amount, decision, rule, decided_at)` (`PENDING` only inside the
+  deciding transaction), `daily_total(payer, business_date, amount)`, `outbox`, `inbox`.
 - recon DB: Spring Batch job repository, `recon_staging`, `recon_result`.
 
 ## 7. Test plan

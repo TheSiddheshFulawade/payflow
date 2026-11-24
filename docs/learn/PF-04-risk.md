@@ -1,9 +1,9 @@
 # PF-04: risk-service, rules, velocity in Hazelcast, and a decision that is made once
 
 Code: `risk-service/src/main/java/com/siddheshfulawade/payflow/risk/`. Requirements: REQ-PF-031 and 032 in SPEC.md.
-Status of the tests, stated honestly: the unit tests and the two-member Hazelcast tests ran green locally
-(`HazelcastVelocityClusterTest` 15/15, plus five extra repeats). Risk's `-Pit` tests (SQL, Kafka, handler) have run
-NOWHERE yet, because Docker failed again. CI `integration` will be the first run. Do not quote them as passing.
+Status of the tests, stated honestly: this note makes no claim that the coverage gate or the `-Pit` tests (SQL, Kafka,
+handler) have passed. Docker was not available locally, and CI is still running. The Hazelcast config changed after the
+audit (member-only port, exact allow-list), so earlier local results do not count for it either.
 
 ## What the code does, in plain words
 
@@ -75,12 +75,15 @@ Everyone takes them in the same order, so two checks never wait for each other i
 ## Hazelcast basics, for someone who knows Kafka
 
 - **Cluster, member**: each risk-service instance embeds a Hazelcast member in its JVM (`RiskConfig.java:21-24`).
-  Members find each other by a fixed list of addresses (`HazelcastConfigFactory.java:48-51`), no multicast.
+  Members find each other by a fixed list of addresses (`HazelcastConfigFactory.java:65-68`), no multicast. The port accepts members only, not Hazelcast clients.
 - **Partition**: a map is cut into 271 partitions (the default), like Kafka partitions of a topic. The key
   (here the payer) picks the partition by hash.
 - **Owner and backup**: every partition lives on one member, the owner, and a copy on another, the backup
-  (`setBackupCount(1)`, `HazelcastConfigFactory.java:60`). Backup is synchronous (`setAsyncBackupCount(0)`, line 61):
-  the call returns only after the backup has the write, so a counted payment is on two members before it is answered.
+  (`setBackupCount(1)`, `HazelcastConfigFactory.java:78`). Backup is synchronous (`setAsyncBackupCount(0)`, line 79):
+  the call returns only after the backup has the write, while a backup exists. A lone member has none, and a new
+  member needs a moment to copy. If the backup ack is missing, `hazelcast.operation.fail.on.indeterminate.state=true`
+  (line 38) makes it an error instead of an answer; the check's outcome is then unknown, the transaction rolls back
+  and the idempotent retry (same payment id) follows. Nothing more is promised than that.
 - **IMap**: a distributed `Map<K,V>`. Here `IMap<String, VelocityWindow>`, key = payer (`HazelcastVelocityCounter.java:23`).
 - **EntryProcessor**: instead of get, change, put (a race between two members), you ship a small function to the
   owner of the key and it runs there. The owner runs processors for one key one after another, so there is no
@@ -107,7 +110,7 @@ entry's time-to-live.
 
 ### TTL = 2 x window
 
-`HazelcastConfigFactory.java:55-62`: `ttl = ceil(2 x window)` in seconds. Entries for idle payers must go away, or the
+`HazelcastConfigFactory.java:71-80`: `ttl = ceil(2 x window)` in seconds. Entries for idle payers must go away, or the
 map grows forever. Two windows and not one, so an entry outlives its newest payment even if two members' clocks
 differ a little. Rounded up because a TTL of 0 means "never expires". It follows the configured window, so a longer
 window never gets a shorter TTL (`HazelcastVelocityClusterTest`, "TTL follows the window", line 345).
@@ -125,7 +128,7 @@ The cost: while we wait, we hold row locks and a Kafka partition. So the wait is
 
 - `CALL_TIMEOUT = 5 s` (`HazelcastVelocityCounter.java:21`) is enforced with `orTimeout` (lines 41-44). Hazelcast's own
   call timeout keeps waiting as long as the owner still sends heartbeats, so it is not a hard bound; the
-  `hazelcast.operation.call.timeout.millis` property is also set to 5 s (`HazelcastConfigFactory.java:27-29`) as a second
+  `hazelcast.operation.call.timeout.millis` property is also set to 5 s (`HazelcastConfigFactory.java:33-35`) as a second
   guard against a gone owner.
 - On timeout or any error, `join()` throws, the transaction rolls back, nothing is approved. That is **fail closed**.
   `HazelcastFailureTest` (line 35) proves it never approves and never hangs.
@@ -136,35 +139,64 @@ Consequence for the saga (for PF-06): with velocity down, one command blocks its
 
 ## Losing a member
 
-With one backup, if the owner dies the backup is promoted to owner and a new backup is made. The synchronous backup
-means every allowed payment was already on the survivor. `survivorKeepsTheCount` (line 214) and
-`backupStaysConsistentUnderLoad` (line 237) test this, for a graceful shutdown and a kill. During the switch a
-call can fail with "partition is migrating"; Hazelcast retries it, which is why its own exception classes are in the
-deserialization allow-list (`HazelcastConfigFactory.java:71-82`). Without them the error cannot be read and the
-check hangs until the 5 s bound instead of being retried.
+With one backup, if the owner dies the backup is promoted to owner and a new backup is made. The backup is
+synchronous, so normally an allowed payment was already on the survivor. `survivorKeepsTheCount` and
+`backupStaysConsistentUnderLoad` in `HazelcastVelocityClusterTest` test this, for a graceful shutdown and a kill. It
+is not a guarantee: an owner lost before its backup caught up loses the count (see the next section). During the
+switch a call can fail with "partition is migrating"; Hazelcast retries it, which is why its own exception classes are
+in the deserialization allow-list (`HazelcastConfigFactory.java:95-111`). Without them the error cannot be read and the
+check waits until the 5 s bound, throws, and the command is retried.
 
 Spring shuts the member down gracefully (`destroyMethod = "shutdown"`, `RiskConfig.java:21`) so it hands over its
-partitions; Hazelcast's own JVM hook is off (`HazelcastConfigFactory.java:30-32`).
+partitions; Hazelcast's own JVM hook is off (`HazelcastConfigFactory.java:39-41`).
 
-## Split-brain: what we accept
+## Split-brain and lost counts: what we accept
 
-If the network splits the two members, each side thinks it is alone and counts for itself. A payer could then get up
-to twice the limit (10 in 60 s instead of 5). When the sides merge, one side's window wins
-(`HazelcastConfigFactory.java:14-16`). We do not add split-brain protection (that needs a quorum, which two members
-cannot give without losing availability). It is acceptable because velocity is a risk control, a speed bump, not a
-money invariant. The single and daily limits and the decision live in PostgreSQL and stay exact. Wallet balances
-never depend on it.
+Two different things, easy to mix up:
+
+- An **unknown** count (cluster unreachable, call timed out, missing backup ack) refuses: the call throws, the
+  transaction rolls back, Kafka redelivers. That is fail closed.
+- A **lost** count approves. The member answers happily from an empty or partial window, so a payer can pass more than
+  5 payments in 60 s. It happens in three cases (`RiskCommandHandler.java:39-40`): a split-brain, all members
+  restarted at once (the map lives only in memory), or an owner lost before its backup caught up.
+
+In a split, each side thinks it is alone and counts for itself, so a payer could get up to twice the limit (10 in 60 s
+instead of 5). When the sides merge, one side's window wins (`HazelcastConfigFactory.java:20-22`). We do not add
+split-brain protection (that needs a quorum, which two members cannot give without losing availability). It is
+acceptable because velocity is a risk control, a speed bump, not a money invariant. The single and daily limits and the
+decision live in PostgreSQL and stay exact. Wallet balances never depend on it.
+
+Two small things we also accept. A redelivered check keeps its first slot time (it cannot extend its life). And the
+time comes from the member that handles the command, so a member with a fast clock prunes old slots early and lets
+a little more through.
 
 ## Java deserialization filter
 
 Hazelcast sends the processor and the window between members using Java serialization. Java deserialization of
 attacker-chosen classes is a classic remote-code-execution risk (gadget chains). So we set an allow-list
-(`HazelcastConfigFactory.java:66-83`): our own package prefix, `UUID`, `Long`, `Number`, `java.util.CollSer`
-(how `Map.copyOf` is serialized), and a few exception classes. `setDefaultsDisabled(true)` removes Hazelcast's
-defaults, which allow all of `java.*`. The network side is closed too: join by TCP-IP to listed members only, no
-multicast, no auto-detect, a fixed port that fails if taken, and a bind address that is not `0.0.0.0`
-(`HazelcastConfigFactory.java:41-52`; `hazelcast.socket.bind.any=false`). `foreignClassesCannotBeDeserialised` (line
-372) and `payflowClassesStillDeserialise` (line 383) check both directions: not too loose, not too tight.
+(`HazelcastConfigFactory.java:83-113`) of exact class names: `VelocityWindow` and `VelocityEntryProcessor`, the types
+of their fields (`UUID`, `Long`, `Number`, `java.util.CollSer`, which is how `Map.copyOf` is serialized), and a few
+Hazelcast exceptions with their base classes. No packages, no prefixes. `setDefaultsDisabled(true)` removes Hazelcast's
+defaults, which allow all of `java.*`. `HazelcastSerializationFilterTest` checks the exact-names rule and that
+other classes are refused.
+
+What the list does NOT cover: it filters Java deserialization only. Other Hazelcast serializers (`DataSerializable`,
+zero-config Compact) do not go through it. So the filter is a second layer, not the wall.
+
+The wall is the network, and it needs to be said plainly:
+
+- The member port has **no authentication**. TLS and member authentication are Enterprise-only, and we use Community.
+- The member list (`HazelcastConfigFactory.java:68`) is for **discovery**, not an access list. Anyone who reaches the
+  port and knows the cluster name can join and change velocity counts. Multicast and auto-detect are off, which only
+  means we do not announce ourselves.
+- The control is where the port is reachable: loopback, or a network that only the members are on, and the port is
+  never published (`docs/adr/0002-architecture.md`, trust boundary). The bind address is a real address, never
+  `0.0.0.0` (`hazelcast.socket.bind.any=false`, line 57; the port fails the start if taken, line 60).
+- The port speaks the **member protocol only**: advanced network config with a single MEMBER endpoint (lines 63-64), so
+  Hazelcast clients are refused. That narrows who can talk to it, but a process that can speak the member protocol can
+  still join.
+
+Kafka's analogy: an open broker listener with no SASL. The network is what protects it.
 
 ## Text sequence diagram
 
@@ -214,7 +246,8 @@ amount, it is a poison message (line 135).
 **3. Why does `daily_total.lock` insert a row of 0 before `select for update`?**
 `for update` locks only existing rows. With no row, two concurrent first payments of the day would both read "nothing,
 so 0" and both pass the limit. Creating the row first (`on conflict do nothing`) gives them one real row to
-queue on (`JdbcDailyTotals.java:19-30`). The second then reads the committed total of the first.
+queue on (`JdbcDailyTotals.java:19-30`). The second then reads the committed total of the first. The day is the UTC date
+(`RiskCommandHandler.java:104`): one fixed rule, no daylight saving, no setting that could differ between members.
 
 **4. What is an EntryProcessor, and why must it be deterministic?**
 A function that Hazelcast ships to the member that owns the key and runs there, one at a time per key, so there is
@@ -223,12 +256,14 @@ the same result: no clock, no randomness. That is why the caller passes `nowMill
 (`VelocityEntryProcessor.java:12-15`, `HazelcastVelocityCounter.java:34-38`). Reading the clock inside would let owner
 and backup disagree about the window.
 
-**5. The network splits the two members. What can go wrong, and why do you accept it?**
+**5. The network splits the two members. What can go wrong, and why do you accept it? What is the TTL of an entry?**
 Each side counts alone, so a payer can send up to twice the limit while the split lasts, and on merge one window wins
-(`HazelcastConfigFactory.java:14-16`). Accepted because velocity is a risk control, not a money invariant: the single
-limit, the daily limit and the permanent decision are in PostgreSQL and stay exact. Strict protection would need a
-quorum or the CP subsystem, which costs availability for a speed bump. The alternative is stated in the README
-Decisions.
+(`HazelcastConfigFactory.java:20-22`). The same is true for a lost count (all members restarted, or an owner lost before
+its backup caught up): it approves, while an unknown count refuses. Accepted because velocity is a risk control, not a
+money invariant: the single limit, the daily limit and the permanent decision are in PostgreSQL and stay exact. Strict
+protection would need a quorum or the CP subsystem, which costs availability for a speed bump. The TTL is twice the
+window, rounded up (`HazelcastConfigFactory.java:71-80`), so an entry outlives its newest payment. The alternative is
+stated in the README Decisions.
 
 ## What breaks if... (exercise)
 
@@ -248,4 +283,6 @@ Check your answers by making the change on a scratch branch and running
 ## TODO-ME
 
 `risk-service/src/test/java/com/siddheshfulawade/payflow/risk/domain/RiskLimitsEdgeTest.java`: a disabled test about the
-daily limit at its edges and the overflow-safe comparison. The instructions are in the file.
+daily limit at its edges and the overflow-safe comparison. What to do and how to check it are in the comment above
+the test (marked `// TODO-ME:`). It is `@Disabled`, so the build stays green while it is unfinished. This is the only
+TODO-ME of PF-04.

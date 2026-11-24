@@ -6,13 +6,17 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import com.hazelcast.core.HazelcastException;
 import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.core.HazelcastInstanceNotActiveException;
 import com.hazelcast.internal.serialization.InternalSerializationService;
 import com.hazelcast.internal.serialization.impl.DefaultSerializationServiceBuilder;
 import com.hazelcast.map.IMap;
+import com.hazelcast.spi.exception.CallerNotMemberException;
 import com.hazelcast.spi.exception.PartitionMigratingException;
-import com.hazelcast.spi.exception.RetryableIOException;
+import com.hazelcast.spi.exception.RetryableHazelcastException;
+import com.hazelcast.spi.exception.TargetNotMemberException;
+import com.hazelcast.spi.exception.WrongTargetException;
 import com.siddheshfulawade.payflow.risk.domain.RiskLimits;
 import com.siddheshfulawade.payflow.risk.domain.VelocityWindow;
 import java.time.Instant;
@@ -47,10 +51,16 @@ class HazelcastFailureTest {
     }
 
     static List<Throwable> errorsBetweenMembers() {
+        // every Hazelcast error the allow-list names, nothing else (the list is exact, see
+        // HazelcastSerializationFilterTest)
         return List.of(
+                new HazelcastException("generic"),
+                new HazelcastInstanceNotActiveException("member is shutting down"),
+                new RetryableHazelcastException("retry"),
                 new PartitionMigratingException(null, 1, "operation", "service"),
-                new RetryableIOException("connection lost"),
-                new HazelcastInstanceNotActiveException("member is shutting down"));
+                new WrongTargetException("wrong target"),
+                new CallerNotMemberException("caller is not a member"),
+                new TargetNotMemberException("target is not a member"));
     }
 
     @ParameterizedTest

@@ -70,8 +70,10 @@ class RiskConcurrencyTest extends RiskIntegrationTest {
             "REQ-PF-021 the same payment checked by 4 threads with different message ids is decided and counted once")
     void samePaymentConcurrentlyIsDecidedOnce() throws Exception {
         for (int round = 0; round < 20; round++) {
+            // a payer of its own per round: one payer may be approved only 5 times in 60 s (velocity)
+            String roundPayer = newPayer();
             UUID payment = UUID.randomUUID();
-            Envelope first = check(payment, payer, 1_000);
+            Envelope first = check(payment, roundPayer, 1_000);
             List<Callable<Envelope>> tasks =
                     List.of(run(first), run(resent(first)), run(resent(first)), run(resent(first)));
 
@@ -81,7 +83,12 @@ class RiskConcurrencyTest extends RiskIntegrationTest {
                     .as("round %d", round)
                     .allSatisfy(r -> assertThat(r.payload()).isEqualTo(new RiskApproved(payment)));
             assertThat(decisionRows(payment)).as("round %d", round).isEqualTo(1);
-            assertThat(dailyTotal(payer)).as("round %d", round).isEqualTo((round + 1) * 1_000L);
+            assertThat(dailyTotal(roundPayer))
+                    .as("round %d: counted once", round)
+                    .isEqualTo(1_000);
+            assertThat(velocity.callsFor(roundPayer))
+                    .as("round %d: only the claiming transaction asks velocity", round)
+                    .isEqualTo(1);
         }
     }
 

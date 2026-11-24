@@ -133,7 +133,7 @@ class RiskIdempotencyTest extends RiskIntegrationTest {
     void contradictionOfARejectionIsPoison() {
         apply(check(payment, payer, 6_000_000));
 
-        assertPoison(check(payment, payer, 100));
+        assertPoison(check(payment, payer, 100), payer, "6000000", payment.toString());
 
         assertThat(decision(payment)).containsEntry("decision", "REJECTED");
     }
@@ -154,7 +154,7 @@ class RiskIdempotencyTest extends RiskIntegrationTest {
     void replyIsPoison() {
         Envelope reply = Envelope.of(new RiskApproved(payment), 1, Clock.systemUTC());
 
-        assertPoison(reply);
+        assertPoison(reply, payment.toString());
 
         assertThat(decisionRows(payment)).isZero();
     }
