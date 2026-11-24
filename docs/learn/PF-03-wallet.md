@@ -48,7 +48,7 @@ message, not a rejection: a rejection could end the saga REJECTED with money sti
 
 Two relays using `SKIP LOCKED` (PF-02) can publish rows out of order: relay A locks the older outbox row (Reserve),
 relay B skips it and publishes the newer one (Release). The wallet then sees Release before Reserve. If it ignored
-the unknown Release, the late Reserve would hold money for a payment that is already cancelled and finished REFUNDED.
+the unknown Release, the late Reserve would hold money for a payment that is already cancelled and finished REVERSED.
 So Release with no hold inserts a `RELEASED` row, the tombstone (`WalletCommandHandler.java:100-106`), and the late
 Reserve finds it and is rejected with `NO_ACTIVE_HOLD` (`Hold.java:34`). Test: `OutOfOrderTest.lateReserveAfterRelease`
 (line 23).
@@ -86,8 +86,8 @@ Rule: lock the payment (its hold row) first, then the wallets in id order.
 
 ## Release on a CAPTURED hold replies FundsCaptured
 
-If the money already reached the payee, replying `FundsReleased` would let the saga finish REFUNDED with nobody
-refunded. The truthful reply is `FundsCaptured` (`Hold.java:49`, test `ReleaseFundsTest.releaseOfCapturedHold`
+If the money already reached the payee, replying `FundsReleased` would let the saga finish REVERSED although the
+payee has the money. The truthful reply is `FundsCaptured` (`Hold.java:49`, test `ReleaseFundsTest.releaseOfCapturedHold`
 line 111). Release also uses the hold's own payer and amount, not the command's (`WalletCommandHandler.java:112-114`).
 
 ## Sequence: a re-sent Reserve and a Release that overtakes it

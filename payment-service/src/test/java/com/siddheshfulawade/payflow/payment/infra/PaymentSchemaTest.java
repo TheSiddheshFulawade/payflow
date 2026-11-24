@@ -122,7 +122,7 @@ class PaymentSchemaTest extends PaymentIntegrationTest {
     @ParameterizedTest
     @EnumSource(
             value = PaymentState.class,
-            names = {"RECEIVED", "COMPLETED", "REFUNDED", "REJECTED"})
+            names = {"RECEIVED", "COMPLETED", "REVERSED", "REJECTED"})
     @DisplayName("REQ-PF-012 RECEIVED and terminal payments must have no deadline")
     void idleAndTerminalHaveNoDeadline(PaymentState state) {
         assertRefused(() -> insert("local", freshKey(), "alice", "bob", 5, "INR", state.name(), 0, ACTIVE_DEADLINE, 0));
@@ -321,14 +321,14 @@ class PaymentSchemaTest extends PaymentIntegrationTest {
     @ParameterizedTest
     @EnumSource(
             value = PaymentState.class,
-            names = {"COMPLETED", "REFUNDED", "REJECTED"})
+            names = {"COMPLETED", "REVERSED", "REJECTED"})
     @DisplayName("REQ-PF-010 a payment has at most one terminal event: a second, different terminal state is refused")
     void secondTerminalIsRefused(PaymentState first) {
         UUID id = storedPayment();
         UUID other = storedPayment();
         addEvent(id, "CAPTURING", first.name());
 
-        for (String second : List.of("COMPLETED", "REFUNDED", "REJECTED")) {
+        for (String second : List.of("COMPLETED", "REVERSED", "REJECTED")) {
             assertThatThrownBy(() -> addEvent(id, "RELEASING", second))
                     .as("%s after %s", second, first)
                     .isInstanceOf(DataIntegrityViolationException.class);

@@ -9,7 +9,7 @@ description: How PayFlow tests are written - test-first, naming, tags, Testconta
 
 - Test first: write the test, see it fail for the right reason, then write the code. A bug fix starts with a test
   that reproduces the bug.
-- Name tests after behaviour and the REQ id from SPEC.md, e.g. `REQ-PF-013 late FundsReserved after refund is ignored`.
+- Name tests after behaviour and the REQ id from SPEC.md, e.g. `REQ-PF-013 late FundsReserved after reversal is ignored`.
 - One behaviour per test; arrange, act, assert separated by blank lines. JUnit 5 + AssertJ + Awaitility.
 - Tags: none = unit (runs everywhere, including Windows CI); `it` = Testcontainers; `system` = full stack and chaos.
 
@@ -33,7 +33,7 @@ release; never releases twice; every path from `RESERVING` ends terminal if the 
 - Chaos actions: `stop`/`start` a container, `pause`/`unpause`, restart Kafka. Act at a random point while payments
   are in flight.
 - Then Awaitility (up to 3 minutes) until every payment is terminal, and run the **invariant checker**:
-  Σ(available + held) unchanged, Σ held = 0, each COMPLETED captured once, REFUNDED and REJECTED moved no money,
+  Σ(available + held) unchanged, Σ held = 0, each COMPLETED captured once, REVERSED and REJECTED moved no money,
   payments = distinct keys, the reconciliation run is all `MATCHED`.
-- Print a one-line result per scenario (payments, COMPLETED, REFUNDED, REJECTED, duration). The README chaos
+- Print a one-line result per scenario (payments, COMPLETED, REVERSED, REJECTED, duration). The README chaos
   table is built from these lines.

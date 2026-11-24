@@ -9,7 +9,7 @@ public enum PaymentState {
     COMPLETED(true),
     /** The hold is being returned to the payer. */
     RELEASING(false),
-    REFUNDED(true),
+    REVERSED(true),
     REJECTED(true);
 
     private final boolean terminal;

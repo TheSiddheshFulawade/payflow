@@ -32,7 +32,7 @@ create table payment (
     constraint payment_request_hash_format check (request_hash ~ '^[0-9a-f]{64}$'),
     constraint payment_idempotency_key_format check (idempotency_key ~ '^[A-Za-z0-9._-]{1,64}$'),
     constraint payment_state_known check (state in (
-        'RECEIVED', 'RESERVING', 'RISK_CHECKING', 'CAPTURING', 'COMPLETED', 'RELEASING', 'REFUNDED', 'REJECTED')),
+        'RECEIVED', 'RESERVING', 'RISK_CHECKING', 'CAPTURING', 'COMPLETED', 'RELEASING', 'REVERSED', 'REJECTED')),
     constraint payment_step_attempts_not_negative check (step_attempts >= 0),
     constraint payment_version_not_negative check (version >= 0),
     -- an in-flight payment without a deadline would be invisible to the sweeper, i.e. stuck; a finished payment with
@@ -59,9 +59,9 @@ create table payment_event (
     constraint payment_event_message_has_attempt check ((message_id is null) = (attempt is null)),
     -- a null from_state passes: "null in (...)" is unknown, and a CHECK refuses only what is false
     constraint payment_event_from_state_known check (from_state in (
-        'RECEIVED', 'RESERVING', 'RISK_CHECKING', 'CAPTURING', 'COMPLETED', 'RELEASING', 'REFUNDED', 'REJECTED')),
+        'RECEIVED', 'RESERVING', 'RISK_CHECKING', 'CAPTURING', 'COMPLETED', 'RELEASING', 'REVERSED', 'REJECTED')),
     constraint payment_event_to_state_known check (to_state in (
-        'RECEIVED', 'RESERVING', 'RISK_CHECKING', 'CAPTURING', 'COMPLETED', 'RELEASING', 'REFUNDED', 'REJECTED'))
+        'RECEIVED', 'RESERVING', 'RISK_CHECKING', 'CAPTURING', 'COMPLETED', 'RELEASING', 'REVERSED', 'REJECTED'))
 );
 
 -- The saga has no loops: a payment enters each state at most once, even if the code were wrong. Also the lookup by
@@ -70,4 +70,4 @@ create unique index payment_event_state_once_idx on payment_event (payment_id, t
 
 -- ... and at most one terminal state (REQ-PF-010).
 create unique index payment_event_one_terminal_idx on payment_event (payment_id)
-    where to_state in ('COMPLETED', 'REFUNDED', 'REJECTED');
+    where to_state in ('COMPLETED', 'REVERSED', 'REJECTED');

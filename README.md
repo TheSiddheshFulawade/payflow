@@ -1,7 +1,7 @@
 # PayFlow
 
 **Crash-safe payment orchestration.** Kill any service, or the Kafka broker, in the middle of a payment: every
-payment still ends `COMPLETED`, `REFUNDED` or `REJECTED`, with no money lost and nothing charged twice.
+payment still ends `COMPLETED`, `REVERSED` or `REJECTED`, with no money lost and nothing charged twice.
 
 > Status: in development (v1 due 30 November 2026). The spec is in [SPEC.md](SPEC.md); the decisions are in [docs/adr](docs/adr).
 
@@ -70,7 +70,7 @@ Filled in task by task: what was chosen, the alternative, and why.
   database applies `available = available - amount` to the current value, so no update overwrites another and a busy
   wallet never retries; wallets lock in id order, so crossing payments cannot deadlock.
 - **Release tombstone** — alternative: ignore a Release with no hold — two `SKIP LOCKED` relays can deliver Release
-  before Reserve; without the tombstone the late Reserve would hold money for a payment that already ended REFUNDED.
+  before Reserve; without the tombstone the late Reserve would hold money for a payment that already ended REVERSED.
 - **Unique `(payment_id, kind)` ledger index** — alternative: trust the code — a payment can never move money twice
   even if a code bug slips past the tests; the database refuses it.
 - **Seeding needs no Idempotency-Key; the wallet id is the key (409 on a retry)** — alternative: a key header — the
@@ -92,7 +92,7 @@ Filled in task by task: what was chosen, the alternative, and why.
 - **Permanent decision row with a PENDING claim** — alternative: the inbox alone — the sweeper re-sends with a new
   message id, so the inbox cannot see it; the primary key on `risk_decision.payment_id` decides once, serialises all
   checks of a payment, and a repeat for other money is poison, not an answer.
-- **Daily total locked per payer and UTC day, approved amounts only, refunds give no headroom back** — alternative:
+- **Daily total locked per payer and UTC day, approved amounts only, reversals give no headroom back** — alternative:
   sum over the decisions, or a business time zone — a locked row makes one payer's payments take turns and read a
   committed total; summing would scan and race. UTC is one fixed rule with no daylight saving, and a limit that only
   counts up is simple to explain.
@@ -138,6 +138,9 @@ Filled in task by task: what was chosen, the alternative, and why.
 - **Compensation replies (`RiskRejected`, `CaptureFailed`) throw until PF-06**. Alternative: ignore them - money is
   held, so ignoring would leave it held with no trace. The retries end in the dead-letter topic, where they are
   visible, and PF-06 adds the release.
+- **Terminal state `REVERSED`, not `REFUNDED`**. Alternative: `REFUNDED` - in card terms a refund returns captured
+  money, but here the hold is released and the payer's money never left, which is an authorisation reversal. The name
+  now matches the money movement (`RELEASING`, `ReleaseFunds` and `FundsReleased` keep their names). No behaviour change.
 
 ## Results
 

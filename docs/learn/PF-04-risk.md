@@ -66,7 +66,7 @@ CHECK `amount >= 0` (`V2__risk.sql:28`) is the last line.
 
 **UTC date**: `LocalDate.ofInstant(now, ZoneOffset.UTC)` (`RiskCommandHandler.java:101`). One fixed rule for "the
 day", no daylight saving, no setting that could differ between members. Only approved amounts count (line 107), and
-a refund does not give headroom back: the total is only ever added to, so the limit means "approved today".
+a reversal does not give headroom back: the total is only ever added to, so the limit means "approved today".
 
 Lock order: the payment's decision row first, then the payer's daily total (`RiskCommandHandler.java:31-32`).
 Everyone takes them in the same order, so two checks never wait for each other in a circle (no deadlock).
