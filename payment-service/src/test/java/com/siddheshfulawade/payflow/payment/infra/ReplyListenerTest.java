@@ -12,6 +12,7 @@ import com.siddheshfulawade.payflow.contracts.ReserveFunds;
 import com.siddheshfulawade.payflow.contracts.RiskApproved;
 import com.siddheshfulawade.payflow.contracts.Topics;
 import com.siddheshfulawade.payflow.payment.domain.Payment;
+import com.siddheshfulawade.payflow.payment.domain.PaymentState;
 import com.siddheshfulawade.payflow.payment.support.PaymentIntegrationTest;
 import java.time.Clock;
 import java.time.Duration;
@@ -125,6 +126,38 @@ class ReplyListenerTest extends PaymentIntegrationTest {
 
         awaitDeadLetter(Topics.RISK_REPLIES, command.messageId().toString());
         assertThat(snapshotAll()).isEqualTo(before);
+    }
+
+    @Test
+    @DisplayName(
+            "REQ-PF-021 a RiskApproved on wallet.replies while RISK_CHECKING is dead-lettered: payment unchanged, no inbox row")
+    void replyOnTheWrongTopicGoesToDeadLetter() {
+        Payment p = newPayment();
+        advanceTo(p.id(), PaymentState.RISK_CHECKING);
+        Snapshot before = snapshotAll();
+        Envelope misrouted = reply(new RiskApproved(p.id()));
+
+        send(Topics.WALLET_REPLIES, misrouted);
+
+        awaitDeadLetter(Topics.WALLET_REPLIES, misrouted.messageId().toString());
+        assertThat(state(p.id())).isEqualTo("RISK_CHECKING");
+        assertThat(count("select count(*) from inbox where message_id = ?", misrouted.messageId()))
+                .isZero();
+        assertThat(snapshotAll()).as("nothing changed").isEqualTo(before);
+    }
+
+    @Test
+    @DisplayName("REQ-PF-021 a reply whose Kafka key is another payment's id is dead-lettered without effect")
+    void replyWithTheWrongKeyGoesToDeadLetter() {
+        Payment p = newPayment();
+        Snapshot before = snapshotAll();
+        Envelope reserved = reply(new FundsReserved(p.id()));
+
+        kafka.produceRaw(Topics.WALLET_REPLIES, UUID.randomUUID().toString(), codec.encode(reserved));
+
+        awaitDeadLetter(Topics.WALLET_REPLIES, reserved.messageId().toString());
+        assertThat(state(p.id())).isEqualTo("RESERVING");
+        assertThat(snapshotAll()).as("nothing changed").isEqualTo(before);
     }
 
     @Test

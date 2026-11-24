@@ -87,6 +87,19 @@ class PaymentConfigTest {
     }
 
     @Test
+    @DisplayName("REQ-PF-004 multipart parsing is off: no endpoint takes uploads, and a bad boundary must not reach it")
+    void multipartIsOff() throws IOException {
+        assertThat(environment(Map.of()).getProperty("spring.servlet.multipart.enabled"))
+                .isEqualTo("false");
+    }
+
+    @Test
+    @DisplayName("REQ-PF-004 HTTP/2 is off: the body limit relies on HTTP/1.1 rules for a request without a length")
+    void http2IsOff() throws IOException {
+        assertThat(environment(Map.of()).getProperty("server.http2.enabled")).isEqualTo("false");
+    }
+
+    @Test
     @DisplayName("REQ-PF-010 the service listens on 8081")
     void port() throws IOException {
         assertThat(environment(Map.of()).getProperty("server.port")).isEqualTo("8081");

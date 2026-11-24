@@ -208,6 +208,19 @@ class RequestLimitsTest {
         verifyNoInteractions(service);
     }
 
+    // ---- multipart: switched off, so a malformed boundary cannot fail inside the container's parser ----
+
+    @Test
+    @DisplayName("REQ-PF-004 multipart/form-data without a boundary is 415 and the service is not called")
+    void multipartWithoutBoundaryIsUnsupported() throws Exception {
+        mvc.perform(post(OPS).contentType("multipart/form-data").content("--x"))
+                .andExpect(status().isUnsupportedMediaType())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.type").value("urn:payflow:problem:unsupported-media-type"));
+
+        verifyNoInteractions(service);
+    }
+
     @Test
     @DisplayName("REQ-PF-004 a GET without a body is not refused by the body limit")
     void getWithoutBodyIsUnaffected() throws Exception {

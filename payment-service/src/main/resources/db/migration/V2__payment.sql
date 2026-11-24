@@ -26,6 +26,11 @@ create table payment (
     constraint payment_amount_in_range check (amount between 1 and 10000000),
     constraint payment_currency_inr check (currency = 'INR'),
     constraint payment_not_to_self check (payer <> payee),
+    -- the same alphabets as the API: log-safe, and every stored payer and payee fits into a command
+    constraint payment_payer_format check (payer ~ '^[A-Za-z0-9][A-Za-z0-9._@-]{0,63}$'),
+    constraint payment_payee_format check (payee ~ '^[A-Za-z0-9][A-Za-z0-9._@-]{0,63}$'),
+    constraint payment_request_hash_format check (request_hash ~ '^[0-9a-f]{64}$'),
+    constraint payment_idempotency_key_format check (idempotency_key ~ '^[A-Za-z0-9._-]{1,64}$'),
     constraint payment_state_known check (state in (
         'RECEIVED', 'RESERVING', 'RISK_CHECKING', 'CAPTURING', 'COMPLETED', 'RELEASING', 'REFUNDED', 'REJECTED')),
     constraint payment_step_attempts_not_negative check (step_attempts >= 0),
@@ -36,8 +41,8 @@ create table payment (
         (state in ('RESERVING', 'RISK_CHECKING', 'CAPTURING', 'RELEASING')) = (deadline_at is not null))
 );
 
--- Audit of every transition, append-only, written in the same transaction as the state change. Re-sending the current
--- step's command (same state, next attempt) is not a transition and writes no row here.
+-- Audit of every transition, append-only by convention, written in the same transaction as the state change. Re-sending
+-- the current step's command (same state, next attempt) is not a transition and writes no row here.
 create table payment_event (
     -- insertion order
     id         bigint      generated always as identity primary key,
@@ -51,7 +56,12 @@ create table payment_event (
     -- why a payment failed; null for a successful step
     reason     text,
     created_at timestamptz not null,
-    constraint payment_event_message_has_attempt check ((message_id is null) = (attempt is null))
+    constraint payment_event_message_has_attempt check ((message_id is null) = (attempt is null)),
+    -- a null from_state passes: "null in (...)" is unknown, and a CHECK refuses only what is false
+    constraint payment_event_from_state_known check (from_state in (
+        'RECEIVED', 'RESERVING', 'RISK_CHECKING', 'CAPTURING', 'COMPLETED', 'RELEASING', 'REFUNDED', 'REJECTED')),
+    constraint payment_event_to_state_known check (to_state in (
+        'RECEIVED', 'RESERVING', 'RISK_CHECKING', 'CAPTURING', 'COMPLETED', 'RELEASING', 'REFUNDED', 'REJECTED'))
 );
 
 -- The saga has no loops: a payment enters each state at most once, even if the code were wrong. Also the lookup by

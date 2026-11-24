@@ -111,6 +111,27 @@ Filled in task by task: what was chosen, the alternative, and why.
   an owner is lost before its backup caught up, a payer may pass more than 5 in a window (up to twice during a split).
   Accepted, because velocity is a risk control, not a money invariant. The daily total and the decision are in
   PostgreSQL and stay exact.
+- **RECEIVED and RESERVING in one transaction**. Alternative: commit RECEIVED first and move on in a second step - one
+  commit means a crash leaves either nothing (the client retries with the same key) or a payment with its
+  `ReserveFunds` already in the outbox. There is no committed payment that nobody is working on.
+- **Unique constraint plus a request hash over the parsed fields, at READ COMMITTED**. Alternative: check with a
+  `select` first, or hash the raw body - a check-then-insert races; the constraint lets the database pick one winner and
+  the loser waits, then reads the winner's row, which needs READ COMMITTED (REPEATABLE READ would fail the insert). A
+  hash of the fields (each with its length) ignores spacing and key order. Same key and body returns the original
+  (200); same key and another body is 422.
+- **Optimistic `version` in a guarded update**. Alternative: `select ... for update` - reads take no lock, and
+  `update ... where version = ?` lets one transaction win; the loser rolls back everything and is redelivered, then
+  decides on the new state. Contention on one payment is rare, so retries are cheap and no lock is held across the
+  handler.
+- **Reply handlers return empty and append the next command to the outbox themselves**. Alternative: return the next
+  command as the inbox's stored reply - a duplicate reply would re-send the command, the wallet would answer the
+  duplicate command with its stored reply, and the two services would loop forever.
+- **Client id is the constant `local` until PF-07**. Alternative: an `X-Client-Id` header - a header lets any caller
+  read or block another client's keys. The JWT subject replaces the constant in PF-07; until then the service listens
+  on loopback only.
+- **Compensation replies (`RiskRejected`, `CaptureFailed`) throw until PF-06**. Alternative: ignore them - money is
+  held, so ignoring would leave it held with no trace. The retries end in the dead-letter topic, where they are
+  visible, and PF-06 adds the release.
 
 ## Results
 
