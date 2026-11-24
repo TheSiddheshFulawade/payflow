@@ -10,6 +10,7 @@ import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.instance.EndpointQualifier;
 import com.hazelcast.internal.serialization.Data;
 import com.hazelcast.internal.serialization.SerializationService;
+import com.hazelcast.map.EntryProcessor;
 import com.hazelcast.spi.impl.SerializationServiceSupport;
 import com.hazelcast.spi.properties.ClusterProperty;
 import com.siddheshfulawade.payflow.risk.app.VelocityCounter;
@@ -28,13 +29,16 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import org.awaitility.Awaitility;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -71,6 +75,11 @@ class HazelcastVelocityClusterTest {
         Awaitility.await("two members joined")
                 .atMost(WAIT)
                 .until(() -> clusterSize(memberA) == 2 && clusterSize(memberB) == 2);
+        // these tests are about a running cluster; HazelcastMemberTest covers the start
+        Awaitility.await("both members know the owner of every partition")
+                .atMost(WAIT)
+                .until(() -> knowsEveryOwner(memberA) && knowsEveryOwner(memberB));
+        awaitClusterSafe(memberA, memberB);
         onA = new HazelcastVelocityCounter(memberA, LIMITS);
         onB = new HazelcastVelocityCounter(memberB, LIMITS);
     }
@@ -84,11 +93,16 @@ class HazelcastVelocityClusterTest {
         }
     }
 
-    private static int clusterSize(HazelcastInstance member) {
+    private static boolean knowsEveryOwner(HazelcastInstance member) {
+        return member.getPartitionService().getPartitions().stream()
+                .allMatch(partition -> partition.getOwner() != null);
+    }
+
+    static int clusterSize(HazelcastInstance member) {
         return member.getCluster().getMembers().size();
     }
 
-    private static int[] freePorts() throws IOException {
+    static int[] freePorts() throws IOException {
         try (ServerSocket first = new ServerSocket(0);
                 ServerSocket second = new ServerSocket(0)) {
             return new int[] {first.getLocalPort(), second.getLocalPort()};
@@ -103,7 +117,7 @@ class HazelcastVelocityClusterTest {
         return UUID.randomUUID();
     }
 
-    private void awaitClusterSafe(HazelcastInstance... members) {
+    static void awaitClusterSafe(HazelcastInstance... members) {
         Awaitility.await("cluster safe (all backups in place)").atMost(WAIT).until(() -> {
             for (HazelcastInstance member : members) {
                 if (!member.getPartitionService().isClusterSafe()) {
@@ -212,6 +226,53 @@ class HazelcastVelocityClusterTest {
         assertThat(results.stream().filter(allowed -> allowed).count()).isEqualTo(5);
     }
 
+    /** Keeps the owner busy. It runs on the calling member and has no backup, so it is never serialized. */
+    private record Blocker(CountDownLatch running, CountDownLatch release)
+            implements EntryProcessor<String, VelocityWindow, Boolean> {
+
+        @Override
+        public Boolean process(Map.Entry<String, VelocityWindow> entry) {
+            running.countDown();
+            try {
+                return release.await(WAIT.toSeconds(), TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                throw new IllegalStateException(e);
+            }
+        }
+
+        @Override
+        public EntryProcessor<String, VelocityWindow, Boolean> getBackupProcessor() {
+            return null;
+        }
+    }
+
+    @Test
+    @DisplayName("REQ-PF-032 a check that timed out on a busy owner can be retried on either member and counts once")
+    void timedOutCheckIsRetried() throws Exception {
+        String payer = payerOwnedBy(memberA);
+        for (int i = 0; i < 4; i++) {
+            assertThat(onA.allow(payer, id(), NOW)).isTrue();
+        }
+        UUID fifth = id();
+        CountDownLatch running = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        try {
+            memberA.<String, VelocityWindow>getMap(HazelcastVelocityCounter.MAP_NAME)
+                    .submitToKey(payer, new Blocker(running, release));
+            assertThat(running.await(WAIT.toSeconds(), TimeUnit.SECONDS)).isTrue();
+
+            assertThatThrownBy(() -> onA.allow(payer, fifth, NOW))
+                    .isInstanceOf(CompletionException.class)
+                    .hasRootCauseInstanceOf(TimeoutException.class);
+        } finally {
+            release.countDown();
+        }
+
+        assertThat(onB.allow(payer, fifth, NOW)).as("retry on B").isTrue();
+        assertThat(onA.allow(payer, fifth, NOW)).as("retry on A").isTrue();
+        assertThat(onA.allow(payer, id(), NOW)).as("a sixth payment").isFalse();
+    }
+
     // ---- REQ-PF-032: a member dies, the count survives (C3) ----
 
     enum Death {
@@ -295,7 +356,7 @@ class HazelcastVelocityClusterTest {
         Awaitility.await("survivor is alone").atMost(WAIT).until(() -> clusterSize(memberA) == 1);
     }
 
-    private <T> List<T> concurrently(List<? extends Callable<T>> tasks) throws Exception {
+    static <T> List<T> concurrently(List<? extends Callable<T>> tasks) throws Exception {
         ExecutorService pool = Executors.newFixedThreadPool(tasks.size());
         CountDownLatch ready = new CountDownLatch(tasks.size());
         CountDownLatch start = new CountDownLatch(1);

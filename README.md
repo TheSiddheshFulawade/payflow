@@ -106,6 +106,12 @@ Filled in task by task: what was chosen, the alternative, and why.
   list, so the real control is the network: loopback or a members-only network, never published (ADR-0002). A single
   MEMBER endpoint refuses Hazelcast clients. With `fail.on.indeterminate.state=true` a missing backup ack throws, the
   transaction rolls back and the idempotent retry follows; nothing more is claimed.
+- **A member starts only when every partition has an owner (30 s bound)** — alternative: Hazelcast's lazy assignment at
+  the first use — the first checks then race the partition table to the other member, which drops a backup for a
+  partition it does not know yet, without an ack; one drop starts a replica sync that can overtake the next backups, so
+  up to 16 of 40 checks waited out their 5 s (measured). The start ends that race for the first checks of a member; it
+  does not remove a lost backup ack in general (a member dying or joining): that check throws and its retry is
+  idempotent.
 - **Embedded two members, no split-brain protection** — alternative: a quorum or the CP subsystem — an unknown count
   refuses, but a LOST count approves: during a split, after all members restart (the map is in memory only), or when
   an owner is lost before its backup caught up, a payer may pass more than 5 in a window (up to twice during a split).
