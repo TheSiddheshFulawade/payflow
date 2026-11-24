@@ -178,7 +178,7 @@ and run on Ubuntu only) and `system` on Ubuntu (chaos tests, on every PR to main
       idempotent consumer helper; Testcontainers tests for crash between DB commit and publish, duplicate delivery (REQ-PF-020 to 022)
 - [x] PF-03 wallet-service: schema, reserve/release/capture handlers, replies, invariant and concurrency tests,
       ops seeding API (REQ-PF-030, 021)
-- [ ] PF-04 risk-service: rules, Hazelcast 2-member velocity with `EntryProcessor`, daily totals, idempotent
+- [x] PF-04 risk-service: rules, Hazelcast 2-member velocity with `EntryProcessor`, daily totals, idempotent
       decisions (REQ-PF-031, 032)
 - [ ] PF-05 payment-service API and saga happy path: validation, `Idempotency-Key`, state machine, outbox commands,
       reply handling, optimistic locking (REQ-PF-001, 002, 004, 010, 014)

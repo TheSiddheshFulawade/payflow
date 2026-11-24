@@ -1,9 +1,8 @@
 # PF-04: risk-service, rules, velocity in Hazelcast, and a decision that is made once
 
 Code: `risk-service/src/main/java/com/siddheshfulawade/payflow/risk/`. Requirements: REQ-PF-031 and 032 in SPEC.md.
-Status of the tests, stated honestly: this note makes no claim that the coverage gate or the `-Pit` tests (SQL, Kafka,
-handler) have passed. Docker was not available locally, and CI is still running. The Hazelcast config changed after the
-audit (member-only port, exact allow-list), so earlier local results do not count for it either.
+Status of the tests: CI `integration` (real PostgreSQL and Kafka, coverage gate included) is green on `916ff54`: 125 risk
+tests run, 1 skipped (the TODO-ME). `-Pit` has not been run locally on this code, because Docker was not available.
 
 ## What the code does, in plain words
 
