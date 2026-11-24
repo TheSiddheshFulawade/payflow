@@ -1,8 +1,32 @@
 spring:
   application:
     name: risk-service
+  # Defaults match deploy/compose.yaml. The password has no default on purpose: demo secrets live in deploy/ only.
+  datasource:
+    # logServerErrorDetail=false: row values stay out of logs and the dead-letter topic
+    url: ${RISK_DB_URL:jdbc:postgresql://localhost:5432/risk?logServerErrorDetail=false}
+    username: ${RISK_DB_USER:risk}
+    password: ${RISK_DB_PASSWORD}
+    hikari:
+      # a stuck transaction must not block a partition forever: the lock wait ends in an error and the command is retried
+      connection-init-sql: set lock_timeout = '5s'
+      # the same as in the default url, and still set when RISK_DB_URL replaces that url
+      data-source-properties:
+        logServerErrorDetail: "false"
+  flyway:
+    # V1 (outbox, inbox) comes from messaging; this service's scripts start at V2.
+    locations: classpath:db/messaging,classpath:db/migration
+  mvc:
+    formcontent:
+      filter:
+        # Boot's form filter reads PUT/PATCH/DELETE bodies; this service has no endpoint that needs one
+        enabled: false
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
 
 server:
+  # no authentication until PF-07, so loopback only; the container sets RISK_BIND=0.0.0.0
+  address: ${RISK_BIND:127.0.0.1}
   port: 8083
 
 management:
@@ -10,3 +34,13 @@ management:
     web:
       exposure:
         include: health
+
+payflow:
+  risk:
+    hazelcast:
+      cluster-name: payflow-risk
+      # two instances on one machine: 5701 and 5702
+      port: ${RISK_HAZELCAST_PORT:5701}
+      members: ${RISK_HAZELCAST_MEMBERS:127.0.0.1:5701,127.0.0.1:5702}
+      # the cluster port has no authentication: loopback, or a private network that only the members are on
+      bind-address: ${RISK_HAZELCAST_BIND:127.0.0.1}

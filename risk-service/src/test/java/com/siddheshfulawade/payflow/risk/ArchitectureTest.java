@@ -10,12 +10,8 @@ import com.tngtech.archunit.junit.ArchTest;
 import com.tngtech.archunit.lang.ArchRule;
 
 /**
- * Package rules from SPEC.md section 3. Only production classes are checked: tests may use any test
- * library.
- *
- * <p>Rules for packages that do not exist yet allow an empty match, so the build stays green while
- * the service grows task by task. When a package gets its first class, remove {@code allowEmptyShould}
- * from its rule so that a rename cannot silently switch the rule off.
+ * Package rules from SPEC.md section 3. Only production classes are checked: tests may use any test library.
+ * risk-service has no {@code api} package (only the health endpoint), so there is no rule for it.
  */
 @AnalyzeClasses(packages = ArchitectureTest.BASE, importOptions = ImportOption.DoNotIncludeTests.class)
 class ArchitectureTest {
@@ -24,7 +20,6 @@ class ArchitectureTest {
 
     private static final String DOMAIN = BASE + ".domain..";
     private static final String INFRA = BASE + ".infra..";
-    private static final String API = BASE + ".api..";
     private static final String APP = BASE + ".app..";
     private static final String CONTRACTS = "com.siddheshfulawade.payflow.contracts..";
 
@@ -35,7 +30,6 @@ class ArchitectureTest {
             .should()
             .onlyDependOnClassesThat()
             .resideInAnyPackage("java..", DOMAIN, CONTRACTS)
-            .allowEmptyShould(true)
             .because("the domain stays plain Java so its rules can be tested without a framework");
 
     @ArchTest
@@ -44,26 +38,33 @@ class ArchitectureTest {
             .resideInAPackage(DOMAIN)
             .should()
             .dependOnClassesThat()
-            .resideInAPackage("org.springframework..")
-            .allowEmptyShould(true);
+            .resideInAPackage("org.springframework..");
 
     @ArchTest
-    static final ArchRule domainDoesNotDependOnInfraApiOrApp = noClasses()
+    static final ArchRule domainDoesNotDependOnInfraOrApp = noClasses()
             .that()
             .resideInAPackage(DOMAIN)
             .should()
             .dependOnClassesThat()
-            .resideInAnyPackage(INFRA, API, APP)
-            .allowEmptyShould(true);
+            .resideInAnyPackage(INFRA, APP);
 
     @ArchTest
-    static final ArchRule apiDoesNotDependOnInfra = noClasses()
+    static final ArchRule appDoesNotDependOnInfra = noClasses()
             .that()
-            .resideInAPackage(API)
+            .resideInAPackage(APP)
             .should()
             .dependOnClassesThat()
             .resideInAPackage(INFRA)
-            .allowEmptyShould(true);
+            .because("the handler talks to Hazelcast and the database only through its ports");
+
+    @ArchTest
+    static final ArchRule hazelcastStaysInInfra = noClasses()
+            .that()
+            .resideInAnyPackage(DOMAIN, APP)
+            .should()
+            .dependOnClassesThat()
+            .resideInAPackage("com.hazelcast..")
+            .because("the rules must not depend on the cache that implements the velocity count");
 
     @ArchTest
     static final ArchRule serviceDoesNotTouchOtherServices = noClasses()
@@ -75,10 +76,9 @@ class ArchitectureTest {
                     "com.siddheshfulawade.payflow.payment..",
                     "com.siddheshfulawade.payflow.wallet..",
                     "com.siddheshfulawade.payflow.recon..")
-            .allowEmptyShould(true)
             .because("services talk through messages and HTTP, never through the classes of another service");
 
     @ArchTest
     static final ArchRule packagesAreFreeOfCycles =
-            slices().matching(BASE + ".(*)..").should().beFreeOfCycles().allowEmptyShould(true);
+            slices().matching(BASE + ".(*)..").should().beFreeOfCycles();
 }

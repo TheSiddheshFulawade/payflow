@@ -84,6 +84,33 @@ Filled in task by task: what was chosen, the alternative, and why.
   re-sent capture naming another payee is caught too.
 - **DB password from the environment, no default** — alternative: a demo default in `application.yml` — a missing
   secret fails at startup instead of silently using a known one; demo values live only in `deploy/`.
+- **Velocity call inside the database transaction, bounded at 5 s** — alternative: count after the commit — a payment could then be approved with no
+  slot taken. Before the commit, an UNKNOWN count (unreachable, timeout, missing backup ack) throws, rolls back and is
+  retried: fail closed. A rolled-back attempt is harmless: the window holds distinct payment ids, so the retry finds
+  its own slot. A redelivered check keeps its first slot time, and a member with a fast clock prunes early; both
+  accepted. The cost is row locks and a Kafka partition held while we wait, hence the bound.
+- **Permanent decision row with a PENDING claim** — alternative: the inbox alone — the sweeper re-sends with a new
+  message id, so the inbox cannot see it; the primary key on `risk_decision.payment_id` decides once, serialises all
+  checks of a payment, and a repeat for other money is poison, not an answer.
+- **Daily total locked per payer and UTC day, approved amounts only, refunds give no headroom back** — alternative:
+  sum over the decisions, or a business time zone — a locked row makes one payer's payments take turns and read a
+  committed total; summing would scan and race. UTC is one fixed rule with no daylight saving, and a limit that only
+  counts up is simple to explain.
+- **Velocity TTL derived from the window (2 x, rounded up)** — alternative: a fixed TTL — a longer window can never get
+  a shorter TTL, and an entry outlives its newest payment despite small clock differences between members.
+- **Member-only port, exact-name allow-list for Java deserialization, a missing backup ack is an error** —
+  alternative: the default unified port (also serves clients), package prefixes, and answering anyway — Hazelcast's
+  defaults allow all of `java.*`, so Java deserialization may create only the exact classes listed (no packages, no
+  prefixes). Other serializers (`DataSerializable`, zero-config Compact) are not covered by the list. The port has no
+  authentication (TLS and member authentication are Enterprise-only) and the member list is discovery, not an access
+  list, so the real control is the network: loopback or a members-only network, never published (ADR-0002). A single
+  MEMBER endpoint refuses Hazelcast clients. With `fail.on.indeterminate.state=true` a missing backup ack throws, the
+  transaction rolls back and the idempotent retry follows; nothing more is claimed.
+- **Embedded two members, no split-brain protection** — alternative: a quorum or the CP subsystem — an unknown count
+  refuses, but a LOST count approves: during a split, after all members restart (the map is in memory only), or when
+  an owner is lost before its backup caught up, a payer may pass more than 5 in a window (up to twice during a split).
+  Accepted, because velocity is a risk control, not a money invariant. The daily total and the decision are in
+  PostgreSQL and stay exact.
 
 ## Results
 

@@ -147,7 +147,8 @@ step_attempts, deadline_at, version, created_at, updated_at, unique(client_id, i
   `payment_event` (audit of transitions), `outbox`, `inbox`.
 - wallet DB: `wallet(id pk, owner_sub, available, held, status, version, CHECK(available>=0), CHECK(held>=0))`,
   `hold(payment_id pk, payer, amount, state, reason, payee)`, `ledger_entry` (every movement, for statements), `outbox`, `inbox`.
-- risk DB: `risk_decision(payment_id pk, decision, rule, decided_at)`, `daily_total(payer, date, amount)`, `outbox`, `inbox`.
+- risk DB: `risk_decision(payment_id pk, payer, amount, decision, rule, decided_at)` (`PENDING` only inside the
+  deciding transaction), `daily_total(payer, business_date, amount)`, `outbox`, `inbox`.
 - recon DB: Spring Batch job repository, `recon_staging`, `recon_result`.
 
 ## 7. Test plan
@@ -177,7 +178,7 @@ and run on Ubuntu only) and `system` on Ubuntu (chaos tests, on every PR to main
       idempotent consumer helper; Testcontainers tests for crash between DB commit and publish, duplicate delivery (REQ-PF-020 to 022)
 - [x] PF-03 wallet-service: schema, reserve/release/capture handlers, replies, invariant and concurrency tests,
       ops seeding API (REQ-PF-030, 021)
-- [ ] PF-04 risk-service: rules, Hazelcast 2-member velocity with `EntryProcessor`, daily totals, idempotent
+- [x] PF-04 risk-service: rules, Hazelcast 2-member velocity with `EntryProcessor`, daily totals, idempotent
       decisions (REQ-PF-031, 032)
 - [ ] PF-05 payment-service API and saga happy path: validation, `Idempotency-Key`, state machine, outbox commands,
       reply handling, optimistic locking (REQ-PF-001, 002, 004, 010, 014)

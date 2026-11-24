@@ -29,5 +29,11 @@ Status: accepted, 2026-11-23
   REST APIs only. The demo broker is PLAINTEXT and its host port is published on 127.0.0.1 only.
 - A real deployment needs SASL or mTLS and per-topic ACLs: only payment-service writes `*.commands`, only
   wallet-service writes `wallet.replies`, only risk-service writes `risk.replies`, and few people read `*.dlt`.
+- Hazelcast is inside the trust boundary too (added at PF-04). The cluster port has no authentication: TLS and member
+  authentication are Enterprise features, and the configured member list is for discovery, not an access list. Any
+  process that reaches the port and knows the cluster name can join and change velocity counts. The control is the
+  network: loopback locally, a members-only network in compose (PF-08), and the port is never published. The port
+  accepts members only, not clients, and an allow-list limits what Java deserialization may create. Velocity is a risk
+  control: the daily total and the decision stay in PostgreSQL.
 - Defence in depth that v1 does have: strict decoding, a command that contradicts the recorded hold is poison
   (dead-letter topic, no effect), guarded SQL and database `CHECK`s.
