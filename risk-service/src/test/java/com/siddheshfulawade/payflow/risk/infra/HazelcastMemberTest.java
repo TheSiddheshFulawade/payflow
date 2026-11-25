@@ -7,6 +7,10 @@ import static com.siddheshfulawade.payflow.risk.infra.HazelcastVelocityClusterTe
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.hazelcast.cluster.ClusterState;
 import com.hazelcast.config.Config;
 import com.hazelcast.core.Hazelcast;
@@ -36,6 +40,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 
 /** A member's start, through the production bean method, and checks that run while the cluster is still forming. */
 class HazelcastMemberTest {
@@ -99,6 +104,40 @@ class HazelcastMemberTest {
         assertThat(everyPartitionAlreadyHasAnOwner(second)).as("second member").isTrue();
     }
 
+    @Test
+    @DisplayName("REQ-PF-032 a lone first member starts promptly and is safe: no backup can exist, none is awaited")
+    void loneFirstMemberStartsPromptlyAndIsSafe() {
+        long begin = System.nanoTime();
+        HazelcastInstance first = startMember(0);
+        Duration took = Duration.ofNanos(System.nanoTime() - begin);
+
+        assertThat(first.getPartitionService().isClusterSafe()).isTrue();
+        assertThat(took).isLessThan(Duration.ofSeconds(20));
+    }
+
+    /** Backups still being copied are the window in which an ack or an operation can be lost. */
+    @Test
+    @DisplayName("REQ-PF-032 a joining member is handed out only when the cluster is safe: no migration pending,"
+            + " every backup in place")
+    void joiningMemberIsHandedOutOnlyWhenClusterIsSafe() {
+        HazelcastInstance first = startMember(0);
+        VelocityCounter onFirst = new HazelcastVelocityCounter(first, LIMITS);
+        // data in many partitions, so the backups to copy to the joiner take time
+        for (int i = 0; i < 2000; i++) {
+            onFirst.allow("payer-" + i, UUID.randomUUID(), NOW);
+        }
+
+        HazelcastInstance second = startMember(1);
+
+        // asked once, right after the start returned: no waiting
+        assertThat(second.getPartitionService().isClusterSafe())
+                .as("joining member sees a safe cluster")
+                .isTrue();
+        assertThat(first.getPartitionService().isClusterSafe())
+                .as("first member sees a safe cluster")
+                .isTrue();
+    }
+
     /** Without the table at the start, the first backups could be dropped and up to 16 of these 40 checks timed out. */
     @RepeatedTest(5)
     @DisplayName("REQ-PF-032 40 checks at once on a just started cluster: all answered, exactly 5 allowed")
@@ -133,6 +172,37 @@ class HazelcastMemberTest {
         assertThat(Hazelcast.getAllHazelcastInstances())
                 .as("no half-started member is left in this JVM")
                 .noneMatch(member -> member.getConfig().getClusterName().equals(cluster) && member != first);
+    }
+
+    @Test
+    @DisplayName("REQ-PF-032 a member whose cluster does not get safe in time warns once, starts anyway and answers")
+    void startsWithOneWarningWhenTheClusterDoesNotGetSafe() {
+        HazelcastInstance first = startMember(0);
+        // the owners are known, but the joiner never gets its backups
+        first.getCluster().changeClusterState(ClusterState.NO_MIGRATION);
+        var logger = (Logger) LoggerFactory.getLogger(HazelcastMember.class);
+        var logs = new ListAppender<ILoggingEvent>();
+        logs.start();
+        logger.addAppender(logs);
+
+        HazelcastInstance second;
+        try {
+            second = track(HazelcastMember.start(config(1), Duration.ofSeconds(1)));
+        } finally {
+            logger.detachAppender(logs);
+        }
+
+        assertThat(second.getPartitionService().isClusterSafe()).isFalse();
+        assertThat(new HazelcastVelocityCounter(second, LIMITS).allow("payer", UUID.randomUUID(), NOW))
+                .isTrue();
+        assertThat(logs.list).hasSize(1);
+        ILoggingEvent warning = logs.list.get(0);
+        assertThat(warning.getLevel()).isEqualTo(Level.WARN);
+        assertThat(warning.getFormattedMessage())
+                .contains("not safe")
+                .doesNotContain("127.0.0.1", cluster, String.valueOf(ports[0]), String.valueOf(ports[1]));
+        assertThat(warning.getArgumentArray()).as("the waited ms").hasSize(1);
+        assertThat((Long) warning.getArgumentArray()[0]).isGreaterThanOrEqualTo(1000);
     }
 
     // ---- a member joins a running one that holds counts ----

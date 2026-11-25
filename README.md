@@ -111,7 +111,7 @@ Filled in task by task: what was chosen, the alternative, and why.
   partition it does not know yet, without an ack; one drop starts a replica sync that can overtake the next backups, so
   up to 16 of 40 checks waited out their 5 s (measured). The start ends that race for the first checks of a member; it
   does not remove a lost backup ack in general (a member dying or joining): that check throws and its retry is
-  idempotent.
+  idempotent. PF-06 added a wait for a safe cluster, see below.
 - **Embedded two members, no split-brain protection** — alternative: a quorum or the CP subsystem — an unknown count
   refuses, but a LOST count approves: during a split, after all members restart (the map is in memory only), or when
   an owner is lost before its backup caught up, a payer may pass more than 5 in a window (up to twice during a split).
@@ -184,6 +184,12 @@ Filled in task by task: what was chosen, the alternative, and why.
   and sends again; the inbox drops the duplicates. Wallet and risk get the same setting in PF-08.
 - **Hazelcast heartbeat 1 s, a hung member evicted after 10 s** (default 60 s). Alternative: the defaults - a check
   would depend on a member that is gone for a minute. 10 s is well inside the 65 s of risk re-sends.
+- **A member is handed out once the cluster is safe; not safe in 30 s (one limit with the owner wait): one WARN, and it
+  starts anyway**. Alternative: hand it out when every partition has an owner - in CI run 45660859725 one of 40 checks
+  that began during the join migrations got no answer and timed out at 1 s (a lost backup ack is inferred; it was not
+  reproduced in 100 local runs). Alternative: refuse to start - a check that times out fails closed and is re-sent, a
+  missing member answers nothing. A member already running still serves checks while another joins, and one of those
+  can still time out.
 - **Index in a new migration `V3__overdue_index.sql`**. Alternative: edit `V2` - an applied migration must never change
   (Flyway checksum), and a partial index on `deadline_at` stays small because only in-flight payments have a deadline.
 
