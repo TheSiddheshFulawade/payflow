@@ -9,6 +9,7 @@ import com.hazelcast.config.MapConfig;
 import com.hazelcast.config.ServerSocketEndpointConfig;
 import com.siddheshfulawade.payflow.risk.domain.RiskLimits;
 import com.siddheshfulawade.payflow.risk.domain.VelocityWindow;
+import java.time.Duration;
 
 /**
  * The embedded member: its port speaks the member protocol only, and every count has one synchronous backup.
@@ -23,18 +24,24 @@ import com.siddheshfulawade.payflow.risk.domain.VelocityWindow;
  */
 final class HazelcastConfigFactory {
 
+    /** Longer than the caller's own bound ({@link HazelcastVelocityCounter#CALL_TIMEOUT}), which ends the wait first. */
+    private static final Duration OPERATION_CALL_TIMEOUT = Duration.ofSeconds(5);
+
     static Config build(HazelcastProperties properties, RiskLimits limits) {
         Config config = new Config();
         config.setClusterName(properties.clusterName());
         config.setProperty("hazelcast.logging.type", "slf4j");
         config.setProperty("hazelcast.phone.home.enabled", "false");
-        // Gives up on a call whose owner is gone or hung. The default of 60 s would hold the database transaction and
-        // the Kafka partition too long.
+        // Hazelcast itself gives up on a call whose owner is gone or hung, instead of after the default 60 s. The
+        // caller stopped waiting long before (HazelcastVelocityCounter); this frees what the call still holds inside.
         config.setProperty(
-                "hazelcast.operation.call.timeout.millis",
-                String.valueOf(HazelcastVelocityCounter.CALL_TIMEOUT.toMillis()));
+                "hazelcast.operation.call.timeout.millis", String.valueOf(OPERATION_CALL_TIMEOUT.toMillis()));
+        // A hung member is evicted after 10 s without a heartbeat (default 60 s) and its backups take over: well inside
+        // the risk step's 65 s of re-sends (5 + 10 + 20 + 30 s), so a check survives a hung member.
+        config.setProperty("hazelcast.heartbeat.interval.seconds", "1");
+        config.setProperty("hazelcast.max.no.heartbeat.seconds", "10");
         // A missing backup ack is an error (the default would answer anyway). The check's outcome is then unknown; the
-        // retry is idempotent, because it asks for the same payment id.
+        // re-sent check is idempotent, because it asks for the same payment id.
         config.setProperty("hazelcast.operation.fail.on.indeterminate.state", "true");
         // Spring shuts the member down (RiskConfig). Hazelcast's own JVM hook would terminate it at the same time,
         // under running checks and without handing over its partitions.
@@ -91,7 +98,7 @@ final class HazelcastConfigFactory {
                 .addClasses("java.util.CollSer", "java.util.UUID", "java.lang.Long", "java.lang.Number")
                 // Hazelcast's own errors travel between members as Java objects: with these, a "partition is
                 // migrating, try again" is retried at once. An error that is missing here can't be read, and the check
-                // fails closed: it waits until its timeout (5 s), throws, and the command is retried.
+                // fails closed: it waits until the caller's bound (1 s), throws, and the sender re-sends the command.
                 .addClasses(
                         "com.hazelcast.core.HazelcastException",
                         "com.hazelcast.core.HazelcastInstanceNotActiveException",

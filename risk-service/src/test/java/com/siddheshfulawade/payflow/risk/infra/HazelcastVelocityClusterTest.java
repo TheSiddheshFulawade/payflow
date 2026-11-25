@@ -14,6 +14,7 @@ import com.hazelcast.map.EntryProcessor;
 import com.hazelcast.spi.impl.SerializationServiceSupport;
 import com.hazelcast.spi.properties.ClusterProperty;
 import com.siddheshfulawade.payflow.risk.app.VelocityCounter;
+import com.siddheshfulawade.payflow.risk.app.VelocityUnavailableException;
 import com.siddheshfulawade.payflow.risk.domain.RiskLimits;
 import com.siddheshfulawade.payflow.risk.domain.VelocityWindow;
 import java.io.ByteArrayOutputStream;
@@ -32,13 +33,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Callable;
-import java.util.concurrent.CompletionException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import org.awaitility.Awaitility;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -261,9 +260,7 @@ class HazelcastVelocityClusterTest {
                     .submitToKey(payer, new Blocker(running, release));
             assertThat(running.await(WAIT.toSeconds(), TimeUnit.SECONDS)).isTrue();
 
-            assertThatThrownBy(() -> onA.allow(payer, fifth, NOW))
-                    .isInstanceOf(CompletionException.class)
-                    .hasRootCauseInstanceOf(TimeoutException.class);
+            assertThatThrownBy(() -> onA.allow(payer, fifth, NOW)).isInstanceOf(VelocityUnavailableException.class);
         } finally {
             release.countDown();
         }

@@ -10,9 +10,11 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 record DeadlinesProperties(
         @DefaultValue("10s") Duration reserve,
         @DefaultValue("5s") Duration risk,
-        @DefaultValue("10s") Duration capture) {
+        @DefaultValue("10s") Duration capture,
+        @DefaultValue("10s") Duration release,
+        @DefaultValue("30s") Duration cap) {
 
     StepDeadlines toDeadlines() {
-        return new StepDeadlines(reserve, risk, capture);
+        return new StepDeadlines(reserve, risk, capture, release, cap);
     }
 }

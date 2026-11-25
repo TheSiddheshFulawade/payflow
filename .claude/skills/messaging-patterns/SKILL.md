@@ -36,11 +36,17 @@ BEGIN; insert into inbox(message_id) on conflict do nothing → 0 rows? duplicat
 
 - One row per payment: `state`, `step_attempts`, `deadline_at`, `version`. Every transition is
   `UPDATE … SET state=?, version=version+1 WHERE id=? AND version=?`; 0 rows means someone else moved it, so reload.
-- Act on a reply only if `reply.type` belongs to the current state and `reply.attempt` is the current attempt.
+- Act on a reply only if `reply.type` belongs to the current state and `reply.attempt` is the current attempt. One
+  exception: while `RELEASING`, the wallet's final answers (`FundsReleased`, `FundsCaptured`) count for any attempt,
+  because a release is re-sent forever and a slow wallet always answers an older one.
 - Each transition writes the next command to the outbox in the same transaction.
-- Sweeper: every 2 s, `select … where state not in terminal and deadline_at < now() for update skip locked limit 50`.
-  Re-send the current command (same payload, attempt + 1). After 3 attempts, go to `RELEASING`. Releases are retried
-  forever with capped backoff and an alert metric.
+- Sweeper: every 2 s, read up to 50 overdue ids without a lock (`deadline_at < now`, oldest first), then one
+  transaction per id: `select … where id = ? and deadline_at < now and state in (in-flight) for update skip locked`.
+  Re-send the current command (same payload, new message id, attempt + 1). 3 re-sends (attempts 1..4), then
+  `RELEASING`. Releases are retried forever with capped backoff and a WARN log (from attempt 4), not an alert metric.
+  A release answered `FundsCaptured` ends COMPLETED. A payment whose command is still unsent in the outbox
+  (`sent_at is null`) is postponed (same attempt, new deadline, no command), not re-sent: only a published command can
+  be late.
 
 ## Kafka settings
 

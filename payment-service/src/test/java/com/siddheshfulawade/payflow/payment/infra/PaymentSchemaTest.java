@@ -339,6 +339,31 @@ class PaymentSchemaTest extends PaymentIntegrationTest {
         assertThat(eventCount(other)).isEqualTo(1);
     }
 
+    // ---- V3: the indexes the sweeper's two queries need ----
+
+    private List<String> indexDefinitions(String table) {
+        return jdbc.queryForList("select lower(indexdef) from pg_indexes where tablename = ?", String.class, table);
+    }
+
+    @Test
+    @DisplayName("REQ-PF-012 V3 indexes the overdue lookup: payment (deadline_at) where deadline_at is not null")
+    void overdueIndexExists() {
+        assertThat(indexDefinitions("payment"))
+                .anySatisfy(definition -> assertThat(definition)
+                        .contains("payment_overdue_idx")
+                        .contains("(deadline_at)")
+                        .contains("deadline_at is not null"));
+    }
+
+    @Test
+    @DisplayName("REQ-PF-012 V3 indexes the unsent-command lookup: outbox (message_key) where sent_at is null")
+    void unsentCommandIndexExists() {
+        assertThat(indexDefinitions("outbox"))
+                .as("the sweeper asks 'has this payment an unsent command' on every overdue payment")
+                .anySatisfy(definition ->
+                        assertThat(definition).contains("(message_key)").contains("sent_at is null"));
+    }
+
     @Test
     @DisplayName("REQ-PF-004 a refused row's values are not in the exception (logServerErrorDetail=false)")
     void errorsDoNotEchoRowValues() {

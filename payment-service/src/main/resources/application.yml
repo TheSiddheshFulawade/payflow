@@ -8,8 +8,11 @@ spring:
     username: ${PAYMENT_DB_USER:payment}
     password: ${PAYMENT_DB_PASSWORD}
     hikari:
-      # a stuck transaction must not block a partition forever: the lock wait ends in an error and the reply is retried
-      connection-init-sql: set lock_timeout = '5s'
+      # lock_timeout: a stuck transaction must not block the listener: the lock wait ends in an error, the reply is retried.
+      # idle_in_transaction_session_timeout: a frozen instance must not hold outbox or payment rows until PostgreSQL
+      # drops the dead session. Above the relay's normal wait inside its transaction: 10 s in send() for each of the 2
+      # command topics, plus 35 s for the acks. A relay cut off all the same rolls back and sends its batch again.
+      connection-init-sql: set lock_timeout = '5s'; set idle_in_transaction_session_timeout = '60s'
       # the same as in the default url, and still set when PAYMENT_DB_URL replaces that url
       data-source-properties:
         logServerErrorDetail: "false"
@@ -27,6 +30,12 @@ spring:
       enabled: false
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+  task:
+    scheduling:
+      pool:
+        # one thread each for outbox relay, sweeper and outbox cleaner: the default single thread would let a relay
+        # that waits for Kafka (up to 35 s) stop the sweeper, and overdue payments would wait for the broker
+        size: 3
 
 server:
   # no authentication until PF-07, so loopback only; the container sets PAYMENT_BIND=0.0.0.0

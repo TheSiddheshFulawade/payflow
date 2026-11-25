@@ -10,6 +10,7 @@ import java.sql.SQLException;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -109,6 +110,38 @@ class JdbcPayments implements Payments {
                 .param("reason", event.reason())
                 .param("created", timestamp(event.createdAt()))
                 .update();
+    }
+
+    @Override
+    public List<UUID> overdueIds(Instant now, int limit) {
+        return jdbc.sql("select id from payment where deadline_at < :now order by deadline_at limit :limit")
+                .param("now", timestamp(now))
+                .param("limit", limit)
+                .query((rs, row) -> rs.getObject("id", UUID.class))
+                .list();
+    }
+
+    @Override
+    public Optional<Payment> lockOverdue(UUID id, Instant now) {
+        // Deadline and state are checked again under the lock: a reply or another sweeper may have moved the payment
+        // since overdueIds. Skip locked: whoever holds the row is moving it right now.
+        return jdbc.sql(SELECT + """
+                        where id = :id and deadline_at < :now
+                          and state in ('RESERVING', 'RISK_CHECKING', 'CAPTURING', 'RELEASING')
+                        for update skip locked""")
+                .param("id", id)
+                .param("now", timestamp(now))
+                .query(JdbcPayments::toPayment)
+                .optional();
+    }
+
+    @Override
+    public boolean hasUnsentCommand(UUID id) {
+        // a row the relay has sent but not committed yet still counts as unsent: the sweeper then only waits longer
+        return jdbc.sql("select exists (select 1 from outbox where message_key = :key and sent_at is null)")
+                .param("key", id.toString())
+                .query((rs, row) -> rs.getBoolean(1))
+                .single();
     }
 
     private static Payment toPayment(ResultSet rs, int row) throws SQLException {

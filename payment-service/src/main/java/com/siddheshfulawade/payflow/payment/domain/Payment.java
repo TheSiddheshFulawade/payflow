@@ -8,9 +8,10 @@ import java.util.UUID;
  *
  * @param requestHash hash of the request that created it (REQ-PF-002)
  * @param amount minor units
- * @param stepAttempts attempt of the current step; only a reply with this attempt counts
+ * @param stepAttempts attempt of the current step; only a reply with this attempt counts, except while RELEASING (see
+ *     {@link SagaStateMachine#on})
  * @param deadlineAt when the current step is overdue; null in RECEIVED and in terminal states
- * @param version optimistic lock: grows by 1 with every transition (REQ-PF-014)
+ * @param version optimistic lock: grows by 1 with every transition, re-send and postponement (REQ-PF-014)
  */
 public record Payment(
         UUID id,
@@ -69,6 +70,34 @@ public record Payment(
                 currency,
                 to,
                 to.terminal() ? stepAttempts : 1,
+                deadline,
+                version + 1,
+                createdAt,
+                now);
+    }
+
+    /** This payment in the same step, on the next attempt. */
+    public Payment nextAttempt(Instant deadline, Instant now) {
+        return sameStep(stepAttempts + 1, deadline, now);
+    }
+
+    /** This payment in the same step, on the same attempt, with a later deadline. */
+    public Payment postponedTo(Instant deadline, Instant now) {
+        return sameStep(stepAttempts, deadline, now);
+    }
+
+    private Payment sameStep(int attempt, Instant deadline, Instant now) {
+        return new Payment(
+                id,
+                clientId,
+                idempotencyKey,
+                requestHash,
+                payer,
+                payee,
+                amount,
+                currency,
+                state,
+                attempt,
                 deadline,
                 version + 1,
                 createdAt,

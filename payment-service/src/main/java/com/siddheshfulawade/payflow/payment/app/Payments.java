@@ -2,6 +2,8 @@ package com.siddheshfulawade.payflow.payment.app;
 
 import com.siddheshfulawade.payflow.payment.domain.Payment;
 import com.siddheshfulawade.payflow.payment.domain.PaymentEvent;
+import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -23,4 +25,22 @@ public interface Payments {
     void update(Payment from, Payment to);
 
     void addEvent(PaymentEvent event);
+
+    /**
+     * Payments whose deadline lies strictly before {@code now}, the longest overdue first. Takes no locks, so it is a
+     * hint: only {@link #lockOverdue} decides.
+     */
+    List<UUID> overdueIds(Instant now, int limit);
+
+    /**
+     * Locks the payment until the caller's transaction ends, if it is (still) overdue. Empty when it moved on in the
+     * meantime, and when another transaction holds it: that one is moving it, so there is nothing to wait for.
+     */
+    Optional<Payment> lockOverdue(UUID id, Instant now);
+
+    /**
+     * Whether a command of the payment is still in the outbox, not marked as published. Asked by whoever holds the
+     * payment's lock: every append comes with an update of the row, so no new command can appear meanwhile.
+     */
+    boolean hasUnsentCommand(UUID id);
 }

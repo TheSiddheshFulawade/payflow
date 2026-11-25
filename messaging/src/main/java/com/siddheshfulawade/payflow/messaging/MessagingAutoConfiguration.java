@@ -42,7 +42,7 @@ import org.springframework.util.backoff.FixedBackOff;
 @EnableScheduling
 public class MessagingAutoConfiguration {
 
-    /** Pause between deliveries of a record whose handler failed (not a poison message). */
+    /** Pause between deliveries of a record whose handler failed (poison and sender-retried failures have none). */
     static final long RETRY_INTERVAL_MS = 500;
 
     /**
@@ -135,8 +135,9 @@ public class MessagingAutoConfiguration {
         // If publishing to the dead-letter topic fails (broker down, no ack), the recoverer throws, the error handler
         // seeks back and the record is delivered again: its offset is not committed, so nothing is lost.
         DefaultErrorHandler handler = new DefaultErrorHandler(deadLetter, new FixedBackOff(RETRY_INTERVAL_MS, RETRIES));
-        // a poison message fails the same way every time: park it at once instead of blocking the partition
-        handler.addNotRetryableExceptions(PoisonMessageException.class);
+        // Parked at once instead of blocking the listener thread: a poison message fails the same way every time, and a
+        // message its sender re-sends is not lost.
+        handler.addNotRetryableExceptions(PoisonMessageException.class, RetriedBySenderException.class);
         return handler;
     }
 
