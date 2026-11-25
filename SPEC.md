@@ -72,6 +72,10 @@ Payment states: `RECEIVED → RESERVING → RISK_CHECKING → CAPTURING → COMP
 and `REJECTED`. **Terminal: COMPLETED, REVERSED, REJECTED.** `REVERSED` means the held funds were returned to the
 payer's available balance (in card terms, an authorisation reversal; a refund would return captured money).
 
+`RELEASING` has one more way out. If the wallet captured the hold before the release arrived (its `FundsCaptured` was
+lost or late), it answers `ReleaseFunds` on a `CAPTURED` hold with `FundsCaptured`, moves nothing, and the payment ends
+`COMPLETED`: `RELEASING → COMPLETED`. The payee has the money, so `REVERSED` would be false.
+
 Wallet money model per wallet: `available` and `held` (both `long`, `CHECK >= 0`). Reserve moves `amount` from
 available to held; release moves it back; capture removes it from the payer's held and adds it to the payee's
 available, in one local transaction. Invariant: **Σ(available + held) over all wallets never changes.**
@@ -84,7 +88,9 @@ Timeouts: each step sets `deadline_at` (step 1 and 3: 10 s; step 2: 5 s; configu
 claims overdue payments with `FOR UPDATE SKIP LOCKED` and re-sends the current command (safe: idempotent) up to
 3 times with backoff; after that it compensates (`ReleaseFunds`), and a release is retried until it succeeds.
 Release and capture never time out into a terminal state without the wallet's confirmation, so a payment can't end
-`REVERSED` while money is still held.
+`REVERSED` while money is still held. Attempts count once the command is published: a payment whose command was never
+published (still unsent in the outbox) waits. The sweeper only sets its next deadline, and neither re-sends nor
+compensates it.
 
 ## 5. Requirements (EARS)
 
@@ -182,7 +188,7 @@ and run on Ubuntu only) and `system` on Ubuntu (chaos tests, on every PR to main
       decisions (REQ-PF-031, 032)
 - [x] PF-05 payment-service API and saga happy path: validation, `Idempotency-Key`, state machine, outbox commands,
       reply handling, optimistic locking (REQ-PF-001, 002, 004, 010, 014)
-- [ ] PF-06 Compensation, timeouts and sweeper; jqwik state-machine properties (REQ-PF-011 to 013)
+- [x] PF-06 Compensation, timeouts and sweeper; jqwik state-machine properties (REQ-PF-011 to 013)
 - [ ] PF-07 Security: resource servers in all three services, realm roles, owner check, problem details for 401/403,
       one Keycloak container test (REQ-PF-003)
 - [ ] PF-08 Dockerfiles (layered Boot jars, non-root), full `compose.yaml`, `demo` script (PowerShell and sh) (REQ-PF-051)
