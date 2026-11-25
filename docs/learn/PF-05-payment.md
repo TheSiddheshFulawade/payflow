@@ -118,11 +118,13 @@ Written next to the code in the Javadoc of `PaymentService.java:18-30` and `Repl
   with ids and states only (`ReplyHandler.java:84-93`).
 - **Two instances, one payment**: both read the same version, one update wins, the other gets `StaleVersionException`,
   rolls back completely and decides again on the new state when it is redelivered.
-- **Lost reply**: the step's deadline passes and the sweeper re-sends the command. The sweeper arrives in PF-06.
+- **Lost reply**: the step's deadline passes and the sweeper re-sends the command. The sweeper arrived with PF-06
+  (see `PF-06-saga-recovery.md`).
 - **`RiskRejected` or `CaptureFailed` (money is held)**: not ignored. `SagaStateMachine.needsCompensation`
   (line 69) is true, and the handler throws `IllegalStateException("compensation arrives with PF-06")`
   (`ReplyHandler.java:74-76`). After the 500 ms x 9 retries the record is parked on the dead-letter topic, where a
-  human can see it. Until PF-06 the payment stays in its step.
+  human can see it. Until PF-06 the payment stays in its step. Changed by PF-06: this is how PF-05 was written; now
+  both replies move the payment to RELEASING and send `ReleaseFunds`.
 
 ## Text sequence diagram
 
@@ -158,7 +160,8 @@ Retry of the POST with the same key and body: insert does nothing, original paym
   10,000,000, currency INR, payer different from payee, a deadline only while in flight (lines 25-41). A unique index
   lets a payment enter each state once, and at most one terminal state (lines 67-73).
 - **Deadline per step**: `StepDeadlines.in` (`StepDeadlines.java:17-25`) returns a deadline for RESERVING,
-  RISK_CHECKING and CAPTURING, none for the others. RELEASING throws until PF-06.
+  RISK_CHECKING and CAPTURING, none for the others. RELEASING threw until PF-06 (changed by PF-06: it has a deadline
+  too, and `StepDeadlines` now backs off per attempt).
 
 ## Five interview questions
 
@@ -193,8 +196,9 @@ nothing.
 The state change, the audit event and the next command commit in one transaction; the command goes to the outbox, not
 to Kafka (`TransitionWriter.java:37-54`). After a crash the relay finds the unsent row and sends it, possibly twice.
 Wallet and risk are idempotent per payment (stored hold and decision), and replies carry the attempt, so a repeat
-changes nothing (`SagaStateMachine.java:38`). If nothing comes back, the step's deadline lets the sweeper re-send in
-PF-06.
+changes nothing (`SagaStateMachine.java:38`; now line 51, and since PF-06 the attempt is not checked while RELEASING,
+see `PF-06-saga-recovery.md`). If nothing comes back, the step's deadline lets the sweeper
+re-send (added in PF-06).
 
 ## What breaks if... (exercise)
 

@@ -125,7 +125,9 @@ because the retry finds its own slot (distinct ids).
 
 The cost: while we wait, we hold row locks and a Kafka partition. So the wait is bounded:
 
-- `CALL_TIMEOUT = 5 s` (`HazelcastVelocityCounter.java:21`) is enforced with `orTimeout` (lines 41-44). Hazelcast's own
+- Changed by PF-06: `CALL_TIMEOUT` is now 1 s (`HazelcastVelocityCounter.java:30`), and the other "5 s" lines in this
+  note describe PF-04 as written. The Hazelcast call timeout stays 5 s as a second guard. As written in PF-04:
+  `CALL_TIMEOUT = 5 s` (`HazelcastVelocityCounter.java:21`) is enforced with `orTimeout` (lines 41-44). Hazelcast's own
   call timeout keeps waiting as long as the owner still sends heartbeats, so it is not a hard bound; the
   `hazelcast.operation.call.timeout.millis` property is also set to 5 s (`HazelcastConfigFactory.java:33-35`) as a second
   guard against a gone owner.
@@ -135,6 +137,9 @@ The cost: while we wait, we hold row locks and a Kafka partition. So the wait is
 
 Consequence for the saga (for PF-06): with velocity down, one command blocks its partition for about 55 s
 (about 10 tries of 5 s, with the 500 ms retry back-offs, README Decisions) while the orchestrator's step deadline is 5 s.
+Resolved by PF-06: the bound is 1 s, the failure is a `RetriedBySenderException` parked after one delivery, and the
+sweeper re-sends the check (see `PF-06-saga-recovery.md`). What is blocked is the instance's one listener thread (it
+serves all partitions): 1 s per failed check at most, not 55 s, so about one check per second in an outage.
 
 ## Losing a member
 
@@ -144,7 +149,7 @@ synchronous, so normally an allowed payment was already on the survivor. `surviv
 is not a guarantee: an owner lost before its backup caught up loses the count (see the next section). During the
 switch a call can fail with "partition is migrating"; Hazelcast retries it, which is why its own exception classes are
 in the deserialization allow-list (`HazelcastConfigFactory.java:95-111`). Without them the error cannot be read and the
-check waits until the 5 s bound, throws, and the command is retried.
+check waits until the bound (5 s in PF-04, 1 s since PF-06), throws, and the command is re-sent.
 
 Spring shuts the member down gracefully (`destroyMethod = "shutdown"`, `RiskConfig.java:21`) so it hands over its
 partitions; Hazelcast's own JVM hook is off (`HazelcastConfigFactory.java:39-41`).
@@ -233,7 +238,7 @@ Last, because it is the only rule with a side effect outside the database (a slo
 by the single or daily rule must take no slot (`RiskCommandHandler.java:113`). Inside the transaction, so that failure
 is closed: if the count is lost, nothing is approved, the transaction rolls back and Kafka redelivers. Counting
 after the commit would approve without a count. The price is holding locks while we wait, so the wait is bounded at
-5 s (`HazelcastVelocityCounter.java:21`).
+5 s (`HazelcastVelocityCounter.java:21`; changed by PF-06 to 1 s, line 30).
 
 **2. A CheckRisk is delivered twice, once with a new message id by the sweeper. What happens?**
 The inbox cannot see the second (new message id). `claim` inserts into `risk_decision` with `on conflict do nothing`

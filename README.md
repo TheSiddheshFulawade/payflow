@@ -50,7 +50,7 @@ Filled in task by task: what was chosen, the alternative, and why.
 - **Inbox in the effect's transaction** — alternative: Kafka exactly-once transactions — Kafka EOS covers only
   Kafka-to-Kafka, while our effects are PostgreSQL rows; the dedupe must commit with the effect (ADR-0002 #5).
 - **Retry 500 ms × 9 then dead-letter topic; poison messages are not retried** — alternative: retry forever — a stuck
-  record blocks every payment on its partition. The saga sweeper re-sends a parked command and handlers are
+  record blocks every payment on its listener thread. The saga sweeper re-sends a parked command and handlers are
   idempotent; a message that cannot be decoded fails the same way every time, so retrying only delays.
 - **Closed type registry built from the sealed permits** — alternative: Jackson `@JsonTypeInfo` default typing — the
   JSON must never choose a Java class (deserialization-gadget risk); the registry is complete at compile time and an
@@ -84,11 +84,11 @@ Filled in task by task: what was chosen, the alternative, and why.
   re-sent capture naming another payee is caught too.
 - **DB password from the environment, no default** — alternative: a demo default in `application.yml` — a missing
   secret fails at startup instead of silently using a known one; demo values live only in `deploy/`.
-- **Velocity call inside the database transaction, bounded at 5 s** — alternative: count after the commit — a payment could then be approved with no
+- **Velocity call inside the database transaction, bounded at 1 s (was 5 s until PF-06)** — alternative: count after the commit — a payment could then be approved with no
   slot taken. Before the commit, an UNKNOWN count (unreachable, timeout, missing backup ack) throws, rolls back and is
   retried: fail closed. A rolled-back attempt is harmless: the window holds distinct payment ids, so the retry finds
   its own slot. A redelivered check keeps its first slot time, and a member with a fast clock prunes early; both
-  accepted. The cost is row locks and a Kafka partition held while we wait, hence the bound.
+  accepted. The cost is row locks and a listener thread held while we wait, hence the bound.
 - **Permanent decision row with a PENDING claim** — alternative: the inbox alone — the sweeper re-sends with a new
   message id, so the inbox cannot see it; the primary key on `risk_decision.payment_id` decides once, serialises all
   checks of a payment, and a repeat for other money is poison, not an answer.
@@ -135,12 +135,57 @@ Filled in task by task: what was chosen, the alternative, and why.
 - **Client id is the constant `local` until PF-07**. Alternative: an `X-Client-Id` header - a header lets any caller
   read or block another client's keys. The JWT subject replaces the constant in PF-07; until then the service listens
   on loopback only.
-- **Compensation replies (`RiskRejected`, `CaptureFailed`) throw until PF-06**. Alternative: ignore them - money is
-  held, so ignoring would leave it held with no trace. The retries end in the dead-letter topic, where they are
-  visible, and PF-06 adds the release.
+- **Compensation replies (`RiskRejected`, `CaptureFailed`) threw until PF-06** (changed by PF-06: they now move the
+  payment to RELEASING, see below). Alternative: ignore them - money is held, so ignoring would leave it held with no
+  trace. For PF-05 the retries ended in the dead-letter topic, where they were visible.
 - **Terminal state `REVERSED`, not `REFUNDED`**. Alternative: `REFUNDED` - in card terms a refund returns captured
   money, but here the hold is released and the payer's money never left, which is an authorisation reversal. The name
   now matches the money movement (`RELEASING`, `ReleaseFunds` and `FundsReleased` keep their names). No behaviour change.
+- **Sweeper: ids first without a lock, then one transaction per overdue payment with `for update skip locked`**.
+  Alternative: one transaction for the whole batch - one failing payment would roll back the good ones and the locks
+  would be held for the whole batch. Deadline and state are checked again under the lock, so a reply or another
+  instance that got there first just makes the sweeper skip. Known limit: 50 payments that fail on every sweep could
+  fill each batch (logged, accepted).
+- **A re-send is the same payload with a new message id and `attempt + 1`**. Alternative: the same message id - the
+  receiver's inbox would drop it as a duplicate. The payload is rebuilt from the payment row, so it cannot differ. Wallet
+  and risk answer a repeat from their stored decision. Replies to an older attempt are ignored.
+- **A release answered `FundsCaptured` ends `COMPLETED`**. Alternative: end `REVERSED` anyway - the payee already has
+  the money, so REVERSED would be false. Only `FundsReleased` ends REVERSED, and a release is re-sent forever (with a
+  WARN from attempt 4), never given up while money may be held.
+- **Re-send a step 3 times (attempts 1 to 4), backoff doubling to a 30 s cap, then release**. Alternative: fixed
+  intervals - a service that is down would be flooded. Risk waits 5 + 10 + 20 + 30 = 65 s, reserve and capture 90 s.
+  A long outage can therefore end healthy payments REVERSED: money is safe, the client pays again.
+- **The sender re-sends instead of Kafka retries (`RetriedBySenderException`)**. Alternative: keep the
+  500 ms x 9 retries - with velocity down one command held the instance's listener thread (it serves all partitions)
+  for about 55 s against a 5 s deadline. Now the velocity call is bounded to 1 s, the failure is parked after one
+  delivery (dead-letter topic), the transaction rolls back the inbox row, and the payment's deadline makes the sweeper
+  send the check again. Cost: with one listener thread an instance gets through about one check per second in a
+  velocity outage; checks queued behind a few others miss their 5 s deadline and are re-sent, not lost.
+- **While RELEASING the wallet's final answer counts for any attempt; every other state needs the exact attempt**.
+  Alternative: exact attempt everywhere - a release is re-sent forever with the deadline capped at 30 s, so a wallet
+  slower than the cap always answers an older attempt and no answer ever matched (found by the PF-06 audit by reading;
+  the first property test was green because it had no latency, and then reproduced it once latency was added). A
+  released, rejected or captured hold never changes again, so an old answer is as true as a new one.
+- **An overdue payment whose command is still unsent in the outbox is postponed** (same attempt, new deadline, no
+  command). Alternative: re-send and count the attempt anyway - a broker outage would spend every attempt, release
+  healthy payments and flood the outbox. REQ-PF-012 is read as "a reply is overdue only for a published command".
+  Accepted: a command the broker never takes keeps its payment and hold waiting until the fault is repaired, visible
+  by a WARN per sweep. Alternative: postpone only up to a maximum age. Known edge: a command published just before its
+  deadline gets a short wait, so it may be re-sent early or its payment released early; both are safe.
+- **A late `CheckRisk` of an already REVERSED payment is still counted** (daily total, and for 60 s a velocity slot).
+  Alternative: look up the payment state in risk - risk has no view of it, and a count that only grows fails closed.
+  Accepted.
+- **Hazelcast: a pause over 10 s evicts a member, and each side may count alone until the merge**. Alternative: longer
+  heartbeat limits - a hung member would then delay checks for longer. Merge timing is to be set in PF-09.
+- **`idle_in_transaction_session_timeout = 60 s` in payment-service**. Alternative: rely on TCP keepalive - it can take
+  hours to drop a dead session, and meanwhile a frozen instance's relay would hold its outbox rows and the sweeper would
+  keep postponing those payments. The relay's normal wait inside its transaction is up to 55 s (10 s in `send()` for
+  each of 2 topics, plus 35 s for the acks), so 60 s does not cut off a healthy relay. A relay cut off anyway rolls back
+  and sends again; the inbox drops the duplicates. Wallet and risk get the same setting in PF-08.
+- **Hazelcast heartbeat 1 s, a hung member evicted after 10 s** (default 60 s). Alternative: the defaults - a check
+  would depend on a member that is gone for a minute. 10 s is well inside the 65 s of risk re-sends.
+- **Index in a new migration `V3__overdue_index.sql`**. Alternative: edit `V2` - an applied migration must never change
+  (Flyway checksum), and a partial index on `deadline_at` stays small because only in-flight payments have a deadline.
 
 ## Results
 
