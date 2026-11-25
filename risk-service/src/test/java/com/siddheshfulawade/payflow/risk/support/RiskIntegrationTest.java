@@ -95,7 +95,8 @@ public abstract class RiskIntegrationTest {
 
     @BeforeEach
     void cleanState() {
-        jdbc.execute("truncate table outbox, inbox, risk_decision, daily_total");
+        // TRUNCATE locks in the listed order: the order the command handler locks (inbox, decision, total, outbox)
+        jdbc.execute("truncate table inbox, risk_decision, daily_total, outbox");
         velocity.reset();
         clock.useSystemTime();
     }

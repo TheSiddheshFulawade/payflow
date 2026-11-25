@@ -64,6 +64,10 @@ public abstract class PaymentIntegrationTest {
 
     public static final Duration TIMEOUT = Duration.ofSeconds(60);
 
+    // TRUNCATE locks tables in the listed order; list them in the order the application's transactions lock them
+    // (inbox, payment, event, outbox), so it can only wait for a running sweep or reply, never deadlock with it.
+    public static final String CLEANUP = "truncate table inbox, payment, payment_event, outbox";
+
     @DynamicPropertySource
     public static void properties(DynamicPropertyRegistry registry) {
         registry.add("spring.datasource.url", Containers.POSTGRES::getJdbcUrl);
@@ -103,7 +107,7 @@ public abstract class PaymentIntegrationTest {
     void cleanState() {
         dropFailureTriggers();
         clock.useSystemTime();
-        jdbc.execute("truncate table outbox, inbox, payment_event, payment");
+        jdbc.execute(CLEANUP);
     }
 
     /** A test that failed halfway must not leave a trigger behind for the next one. */

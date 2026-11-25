@@ -69,7 +69,8 @@ public abstract class WalletIntegrationTest {
 
     @BeforeEach
     void cleanState() {
-        jdbc.execute("truncate table outbox, inbox, ledger_entry, hold, wallet");
+        // TRUNCATE locks in the listed order: the order the command handler locks (inbox, hold, wallet, ledger, outbox)
+        jdbc.execute("truncate table inbox, hold, wallet, ledger_entry, outbox");
     }
 
     // ---- commands (a fresh message id each time) ----
