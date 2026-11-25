@@ -10,6 +10,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.core.NestedExceptionUtils;
 import org.springframework.stereotype.Component;
 
 /** One velocity window per payer in a map shared by all members; changed only through the entry processor. */
@@ -19,10 +22,14 @@ public class HazelcastVelocityCounter implements VelocityCounter {
     public static final String MAP_NAME = "velocity";
 
     /**
-     * The caller holds row locks and a Kafka partition while it waits, so the wait is short: far below the risk step's
-     * first deadline of 5 s, so even a few checks in a row on a hung cluster do not make the checks behind them overdue.
+     * The caller holds row locks and the listener thread while it waits, so the wait is short. One listener thread
+     * serves all partitions of this instance, so during a velocity outage an instance gets through about one check per
+     * second, whatever their partitions. Checks that queue behind more than a few others miss their first deadline
+     * (5 s) and are re-sent; they are not lost.
      */
     static final Duration CALL_TIMEOUT = Duration.ofSeconds(1);
+
+    private static final Logger log = LoggerFactory.getLogger(HazelcastVelocityCounter.class);
 
     private final IMap<String, VelocityWindow> windows;
     private final RiskLimits limits;
@@ -34,7 +41,7 @@ public class HazelcastVelocityCounter implements VelocityCounter {
 
     /**
      * Fails closed: an unreachable, failing or slow cluster throws, the caller's transaction rolls back, and the sender
-     * re-sends the check. One delivery costs the partition {@link #CALL_TIMEOUT} at most.
+     * re-sends the check. One delivery costs the listener thread {@link #CALL_TIMEOUT} at most.
      */
     @Override
     public boolean allow(String payer, UUID paymentId, Instant now) {
@@ -53,7 +60,16 @@ public class HazelcastVelocityCounter implements VelocityCounter {
         } catch (RuntimeException e) {
             // every failure means the same, the count is unknown: no answer, an error, or the call itself threw
             // (the member is shut down)
-            throw new VelocityUnavailableException(e);
+            var unavailable = new VelocityUnavailableException(e);
+            // Types only: the texts come from Hazelcast and may quote the payer. No stack trace: in an outage this is
+            // logged for every check.
+            log.warn(
+                    "velocity check failed: {} caused by {}",
+                    unavailable.getClass().getName(),
+                    NestedExceptionUtils.getMostSpecificCause(unavailable)
+                            .getClass()
+                            .getName());
+            throw unavailable;
         }
     }
 }

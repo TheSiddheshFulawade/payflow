@@ -29,6 +29,8 @@ class SweeperSchedule implements SchedulingConfigurer {
         if (settings.enabled()) {
             // fixed delay, not fixed rate: sweeps never overlap within one instance (SKIP LOCKED covers other ones)
             registrar.addFixedDelayTask(this::sweep, settings.interval());
+        } else {
+            log.warn("the payment sweeper is disabled on this instance: if no other one sweeps, payments get stuck");
         }
     }
 

@@ -28,7 +28,8 @@ import org.springframework.transaction.annotation.Transactional;
  *   <li>crash before or after the next command is published: it is in the outbox; the relay sends it (again)
  *   <li>duplicate (same message id): the inbox drops it; nothing is re-sent, see {@link #handle}
  *   <li>the same reply re-sent under a new message id, a late reply, another attempt, a finished payment: no
- *       transition exists, so it is ignored; its inbox row stays
+ *       transition exists, so it is ignored; its inbox row stays. While RELEASING the wallet's final word counts for
+ *       any attempt
  *   <li>two instances on one payment, or the sweeper: both may read the same version, one update wins, the other finds
  *       0 rows, rolls back completely and decides again on the new state when it is redelivered
  *   <li>lost or parked reply: the step's deadline passes; the {@link PaymentSweeper} re-sends the command

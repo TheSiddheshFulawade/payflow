@@ -296,6 +296,27 @@ public abstract class PaymentIntegrationTest {
                 count("select count(*) from inbox"));
     }
 
+    // ---- the relay, played by hand (it is switched off in these tests) ----
+
+    /** The relay got every command to the broker: all outbox rows are sent (they stay readable). */
+    protected void relayAll() {
+        jdbc.update("update outbox set sent_at = now() where sent_at is null");
+    }
+
+    /** True while the payment's latest command has not been published (a broker outage, a slow relay). */
+    protected long unsentCommands(UUID id) {
+        return count("select count(*) from outbox where message_key = ? and sent_at is null", id.toString());
+    }
+
+    /**
+     * One sweep after the relay delivered everything. The sweeper waits for an unsent command before it sends another
+     * (a re-send would only pile up behind it), so tests that want a re-send publish first.
+     */
+    protected int sweepRelayed() {
+        relayAll();
+        return sweeper.sweep();
+    }
+
     // ---- injected failures: a database trigger stands in for "the process failed at exactly this statement" ----
 
     /** Every UPDATE of the payment table silently affects 0 rows, as if another instance had moved it first. */

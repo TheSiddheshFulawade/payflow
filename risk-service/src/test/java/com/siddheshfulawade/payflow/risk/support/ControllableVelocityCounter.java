@@ -31,6 +31,7 @@ public final class ControllableVelocityCounter implements VelocityCounter {
     private final List<Instant> callTimes = new CopyOnWriteArrayList<>();
     private volatile Mode mode = Mode.DELEGATE;
     private volatile Duration delay = Duration.ZERO;
+    private volatile String causeText = "velocity cluster did not answer";
 
     public ControllableVelocityCounter(VelocityCounter real) {
         this.real = real;
@@ -48,7 +49,7 @@ public final class ControllableVelocityCounter implements VelocityCounter {
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 }
-                throw new VelocityUnavailableException(new IllegalStateException("velocity cluster did not answer"));
+                throw new VelocityUnavailableException(new IllegalStateException(causeText));
             }
             case DELEGATE -> real.allow(payer, paymentId, now);
             case ALLOW_ALL -> true;
@@ -62,6 +63,15 @@ public final class ControllableVelocityCounter implements VelocityCounter {
 
     /** Every check takes {@code after}, then fails like the real counter does when the cluster does not answer. */
     public void unavailableAfter(Duration after) {
+        unavailableAfter(after, "velocity cluster did not answer");
+    }
+
+    /**
+     * As above, with the text of the cause: library causes quote what they were asked (payer, amount), so a test puts
+     * such values in and checks that they do not travel on.
+     */
+    public void unavailableAfter(Duration after, String causeText) {
+        this.causeText = causeText;
         delay = after;
         mode = Mode.UNAVAILABLE_AFTER_DELAY;
     }

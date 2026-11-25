@@ -72,6 +72,18 @@ class PaymentConfigTest {
     }
 
     @Test
+    @DisplayName("REQ-PF-020 a pooled connection ends an idle transaction after 60 s: a frozen relay frees its rows")
+    void connectionsSetIdleInTransactionTimeout() throws IOException {
+        String initSql = environment(Map.of()).getProperty("spring.datasource.hikari.connection-init-sql");
+
+        assertThat(initSql)
+                .containsIgnoringCase("idle_in_transaction_session_timeout")
+                .containsPattern("(?i)idle_in_transaction_session_timeout\\s*(=|to)\\s*'?60s'?")
+                .as("lock_timeout stays")
+                .containsPattern("(?i)lock_timeout\\s*(=|to)\\s*'?5s'?");
+    }
+
+    @Test
     @DisplayName("REQ-PF-020 Flyway reads the messaging tables (V1) and this service's own scripts")
     void flywayLocations() throws IOException {
         assertThat(environment(Map.of()).getProperty("spring.flyway.locations"))

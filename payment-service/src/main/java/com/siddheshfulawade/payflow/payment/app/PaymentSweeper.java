@@ -18,7 +18,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * Moves payments whose step got no reply in time: re-sends the command, or gives the step up and releases the hold
- * (REQ-PF-012). No payment stays stuck, because every state that waits has a deadline (a CHECK enforces it) and every
+ * (REQ-PF-012). Only a published command can be late: a payment whose command is still unsent in the outbox is
+ * postponed. No payment is forgotten, because every state that waits has a deadline (a CHECK enforces it) and every
  * sweep sets the next one.
  *
  * <p>One transaction per payment, so a failing payment rolls back alone. Re-sending is safe because wallet and risk are
@@ -35,13 +36,23 @@ import org.springframework.transaction.support.TransactionTemplate;
  *       under the lock that its deadline has moved
  *   <li>sweeper against a reply: the reply's update and our lock exclude each other. If the reply commits first, the
  *       payment is not overdue any more. If we do, the reply's guarded update finds another version, rolls back, is
- *       redelivered, and is then an old attempt
- *   <li>reply to an old attempt: ignored, see {@link SagaStateMachine#on}. Nothing is lost: the re-sent command gets its
- *       own answer, from the same decision
+ *       redelivered and decided again: an old attempt by then, unless we only postponed, or it ends a release
+ *   <li>reply to an old attempt: ignored, except the wallet's final word while RELEASING, see
+ *       {@link SagaStateMachine#on}. Nothing is lost: the re-sent command gets its own answer, from the same decision
  *   <li>reply or command parked on the dead-letter topic: the same as a lost one, the re-send gets a new answer
- *   <li>broker down: commands wait in the outbox, in order, and the sweep goes on. After an outage longer than a step's
- *       re-sends the wallet gets the late step and then its release. If it was the capture, the release is answered
- *       FundsCaptured and the payment ends COMPLETED; otherwise REVERSED
+ *   <li>broker down, or the relay slow or stopped: the command is still unsent in the outbox, so the payment is only
+ *       postponed by its current wait. No attempt is used up, nothing piles up behind the command, and no payment is
+ *       released while its command is unsent. A reply is still handled at any time. The deadline is not counted from
+ *       the publish: a command published just before it gets a short wait, so it is re-sent early or, on the last
+ *       attempt, its payment is released early. Both are safe
+ *   <li>an instance frozen or cut off inside a transaction: it keeps its payment or outbox rows locked, so sweeps skip
+ *       the payment, or postpone it because its command is unsent. PostgreSQL ends the idle session after 60 s
+ *       (application.yml), which rolls back and unlocks; the next sweep or relay run, on any instance, takes the rows
+ *   <li>a command the broker never takes (topic missing or not writable): its payment is postponed until that is
+ *       repaired, with the warning of {@link #sweep()} and the relay's own. A dead peer is not such a case: it ends
+ *       after the 60 s above. The hold is kept that long, even if only the risk topic is at fault and a release could
+ *       reach the wallet: "unsent" does not tell us why. This postponement is our reading of REQ-PF-012: a step's
+ *       retries count sends that left, not sends that wait in the outbox
  *   <li>a release that is never answered: re-sent forever at the capped interval, with a warning past attempt
  *       {@value #WARN_AFTER_RELEASE_ATTEMPT}. It never ends by itself, so a payment can't end REVERSED while money is
  *       held
@@ -83,35 +94,54 @@ public class PaymentSweeper {
      * One pass over at most {@code batchSize} overdue payments, by the application's clock (which also set their
      * deadlines), not the database's.
      *
-     * @return how many payments were moved
+     * @return how many payments were re-sent or compensated. A postponed payment is not counted: nothing was sent for
+     *     it. Neither is one that was skipped or failed.
      */
     public int sweep() {
         Instant now = transitions.now();
         int moved = 0;
+        int postponed = 0;
         for (UUID id : payments.overdueIds(now, batchSize)) {
             try {
-                Optional<Payment> payment = move(id, now);
-                if (payment.isPresent()) {
+                Optional<Swept> swept = sweep(id, now);
+                if (swept.isEmpty()) {
+                    continue;
+                }
+                if (swept.get().postponed()) {
+                    postponed++;
+                } else {
                     moved++;
-                    logMoved(payment.get());
+                    logMoved(swept.get().payment());
                 }
             } catch (RuntimeException e) {
                 logFailed(id, e);
             }
         }
+        if (postponed > 0) {
+            // one line per sweep, not per payment: in an outage every in-flight payment is postponed
+            log.warn("{} overdue payments were postponed: their commands are not published yet", postponed);
+        }
         return moved;
     }
 
+    private record Swept(Payment payment, boolean postponed) {}
+
     /** Row, event (if any) and command commit together or not at all (REQ-PF-020). */
-    private Optional<Payment> move(UUID id, Instant now) {
-        return transaction.execute(status -> payments.lockOverdue(id, now).map(this::move));
+    private Optional<Swept> sweep(UUID id, Instant now) {
+        return transaction.execute(status -> payments.lockOverdue(id, now).map(this::sweep));
     }
 
-    private Payment move(Payment payment) {
-        return switch (SagaStateMachine.overdue(payment, maxResends)) {
+    private Swept sweep(Payment payment) {
+        // Before the decision to re-send or compensate: an unpublished command has no reply to wait for, so it used up
+        // nothing, and another command would only queue up behind it.
+        if (payments.hasUnsentCommand(payment.id())) {
+            return new Swept(transitions.postpone(payment), true);
+        }
+        Payment moved = switch (SagaStateMachine.overdue(payment, maxResends)) {
             case Overdue.Resend resend -> transitions.resend(payment, resend.command());
             case Overdue.Compensate compensate -> transitions.write(payment, compensate.transition(), null);
         };
+        return new Swept(moved, false);
     }
 
     /** Ids, states and attempts only: account ids stay out of the log. */

@@ -15,8 +15,8 @@ import java.time.temporal.ChronoUnit;
  * The only way a payment row changes: the guarded update and what goes with it, all in the caller's transaction
  * (REQ-PF-014, 020).
  *
- * <p>A transition writes row, audit event and next command. A re-send keeps the state and writes no event: a payment
- * enters each state once (a unique index on payment_event enforces it).
+ * <p>A transition writes row, audit event and next command. A re-send or a postponement keeps the state and writes no
+ * event: a payment enters each state once (a unique index on payment_event enforces it).
  */
 final class TransitionWriter {
 
@@ -66,6 +66,19 @@ final class TransitionWriter {
         Payment to = from.nextAttempt(deadline(from.state(), from.stepAttempts() + 1, now), now);
         payments.update(from, to);
         send(command, to);
+        return to;
+    }
+
+    /**
+     * The current attempt gets its full wait again, from now. No command and no event: nothing happened to the payment.
+     * The guarded update makes a reply that is being handled at the same time decide again.
+     *
+     * @throws StaleVersionException if another transaction moved the payment first
+     */
+    Payment postpone(Payment from) {
+        Instant now = now();
+        Payment to = from.postponedTo(deadline(from.state(), from.stepAttempts(), now), now);
+        payments.update(from, to);
         return to;
     }
 

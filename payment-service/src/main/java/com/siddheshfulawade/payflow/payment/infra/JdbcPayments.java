@@ -135,6 +135,15 @@ class JdbcPayments implements Payments {
                 .optional();
     }
 
+    @Override
+    public boolean hasUnsentCommand(UUID id) {
+        // a row the relay has sent but not committed yet still counts as unsent: the sweeper then only waits longer
+        return jdbc.sql("select exists (select 1 from outbox where message_key = :key and sent_at is null)")
+                .param("key", id.toString())
+                .query((rs, row) -> rs.getBoolean(1))
+                .single();
+    }
+
     private static Payment toPayment(ResultSet rs, int row) throws SQLException {
         return new Payment(
                 rs.getObject("id", UUID.class),

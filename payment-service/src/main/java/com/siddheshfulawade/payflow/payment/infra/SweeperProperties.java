@@ -9,9 +9,9 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * payments get stuck.
  *
  * @param enabled whether this instance sweeps on a schedule (tests turn it off and call the sweeper directly)
- * @param interval pause between sweeps
- * @param batchSize payments per sweep
- * @param maxResends re-sends of a step before its payment is released
+ * @param interval pause between sweeps, 100 ms to 1 min: neither a busy loop on the database nor hardly ever
+ * @param batchSize payments per sweep, 1 to 1000
+ * @param maxResends re-sends of a step before its payment is released, 0 to 20
  */
 @ConfigurationProperties("payflow.payment.sweeper")
 record SweeperProperties(
@@ -20,10 +20,15 @@ record SweeperProperties(
         @DefaultValue("50") int batchSize,
         @DefaultValue("3") int maxResends) {
 
+    static final Duration MIN_INTERVAL = Duration.ofMillis(100);
+    static final Duration MAX_INTERVAL = Duration.ofMinutes(1);
+
     SweeperProperties {
-        require(interval.isPositive(), "interval must be positive");
-        require(batchSize >= 1, "batch-size must be at least 1");
-        require(maxResends >= 0, "max-resends must not be negative");
+        require(
+                interval.compareTo(MIN_INTERVAL) >= 0 && interval.compareTo(MAX_INTERVAL) <= 0,
+                "interval must be 100ms to 1m");
+        require(batchSize >= 1 && batchSize <= 1_000, "batch-size must be 1 to 1000");
+        require(maxResends >= 0 && maxResends <= 20, "max-resends must be 0 to 20");
     }
 
     private static void require(boolean valid, String message) {

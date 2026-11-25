@@ -102,7 +102,7 @@ class CompensationFlowTest extends PaymentIntegrationTest {
         // the capture reply was lost, the capture timed out into a release ...
         for (int i = 0; i < 4; i++) {
             clock.advance(Duration.ofSeconds(31));
-            sweeper.sweep();
+            sweepRelayed();
         }
         assertThat(state(p.id())).isEqualTo("RELEASING");
         long commands = outboxCount(p.id());

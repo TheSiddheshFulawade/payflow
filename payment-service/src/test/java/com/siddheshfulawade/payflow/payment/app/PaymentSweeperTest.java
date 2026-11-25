@@ -71,7 +71,7 @@ class PaymentSweeperTest extends PaymentIntegrationTest {
         List<String> eventsBefore = events(p.id());
         clock.advance(Duration.ofSeconds(11)); // the reserve deadline is 10 s
 
-        int handled = sweeper.sweep();
+        int handled = sweepRelayed();
 
         assertThat(handled).isEqualTo(1);
         assertThat(state(p.id())).isEqualTo("RESERVING");
@@ -99,11 +99,11 @@ class PaymentSweeperTest extends PaymentIntegrationTest {
         clock.advance(Duration.ofSeconds(10));
         Snapshot before = snapshotAll();
 
-        assertThat(sweeper.sweep()).isZero();
+        assertThat(sweepRelayed()).isZero();
         assertThat(snapshotAll()).isEqualTo(before);
 
         clock.advance(Duration.ofNanos(1_000)); // one microsecond, the resolution of the column
-        assertThat(sweeper.sweep()).isEqualTo(1);
+        assertThat(sweepRelayed()).isEqualTo(1);
         assertThat(stepAttempts(p.id())).isEqualTo(2);
     }
 
@@ -125,7 +125,7 @@ class PaymentSweeperTest extends PaymentIntegrationTest {
 
         for (int attempt = 2; attempt <= 4; attempt++) {
             passDeadlines();
-            assertThat(sweeper.sweep()).as("sweep to attempt %d", attempt).isEqualTo(1);
+            assertThat(sweepRelayed()).as("sweep to attempt %d", attempt).isEqualTo(1);
 
             assertThat(state(p.id())).isEqualTo(state.name());
             assertThat(stepAttempts(p.id())).isEqualTo(attempt);
@@ -140,7 +140,7 @@ class PaymentSweeperTest extends PaymentIntegrationTest {
         assertThat(commands(p.id(), ReleaseFunds.class)).isEmpty();
 
         passDeadlines();
-        assertThat(sweeper.sweep()).isEqualTo(1);
+        assertThat(sweepRelayed()).isEqualTo(1);
 
         assertThat(state(p.id())).isEqualTo("RELEASING");
         assertThat(stepAttempts(p.id())).as("the release is a new step").isEqualTo(1);
@@ -170,7 +170,7 @@ class PaymentSweeperTest extends PaymentIntegrationTest {
 
         for (int attempt = 2; attempt <= 8; attempt++) {
             passDeadlines();
-            assertThat(sweeper.sweep()).isEqualTo(1);
+            assertThat(sweepRelayed()).isEqualTo(1);
 
             assertThat(state(p.id())).isEqualTo("RELEASING");
             assertThat(stepAttempts(p.id())).isEqualTo(attempt);
@@ -192,13 +192,13 @@ class PaymentSweeperTest extends PaymentIntegrationTest {
         advanceTo(p.id(), PaymentState.RELEASING);
         for (int attempt = 2; attempt <= 3; attempt++) {
             passDeadlines();
-            sweeper.sweep();
+            sweepRelayed();
         }
         assertThat(warnings()).as("no warning up to attempt 3").isEmpty();
 
         for (int attempt = 4; attempt <= 6; attempt++) {
             passDeadlines();
-            sweeper.sweep();
+            sweepRelayed();
         }
 
         assertThat(warnings()).isNotEmpty();
@@ -214,21 +214,60 @@ class PaymentSweeperTest extends PaymentIntegrationTest {
     }
 
     @Test
-    @DisplayName("REQ-PF-011 the wallet's FundsReleased on a late attempt ends the retried release (REVERSED)")
-    void retriedReleaseEndsWithTheWalletsAnswer() {
+    @DisplayName("REQ-PF-011 the wallet's FundsReleased of ANY attempt ends the retried release (REVERSED)")
+    void retriedReleaseEndsWithTheWalletsAnswerOfAnyAttempt() {
         Payment p = newPayment();
         advanceTo(p.id(), PaymentState.RELEASING);
         for (int attempt = 2; attempt <= 7; attempt++) {
             passDeadlines();
-            sweeper.sweep();
+            sweepRelayed();
         }
 
         deliver(reply(new FundsReleased(p.id()), 1));
-        assertThat(state(p.id())).as("the answer to attempt 1 is old").isEqualTo("RELEASING");
-        deliver(reply(new FundsReleased(p.id()), 7));
 
-        assertThat(state(p.id())).isEqualTo("REVERSED");
+        assertThat(state(p.id()))
+                .as("the answer to attempt 1 is old, but it is the wallet's final word on the hold")
+                .isEqualTo("REVERSED");
         assertThat(deadline(p.id())).isNull();
+        long version = version(p.id());
+        deliver(reply(new FundsReleased(p.id()), 7));
+        assertThat(version(p.id()))
+                .as("the answers of the other attempts change nothing")
+                .isEqualTo(version);
+    }
+
+    @Test
+    @DisplayName("REQ-PF-011 a FundsCaptured of an old attempt while RELEASING completes the payment: the money moved")
+    void oldCaptureAnswerWhileReleasingCompletes() {
+        Payment p = newPayment();
+        advanceTo(p.id(), PaymentState.CAPTURING);
+        for (int i = 0; i < 4; i++) {
+            passDeadlines();
+            sweepRelayed();
+        }
+        assertThat(state(p.id())).isEqualTo("RELEASING");
+        passDeadlines();
+        sweepRelayed(); // release attempt 2
+
+        deliver(reply(new FundsCaptured(p.id()), 1)); // the wallet's answer to the first release or the capture
+
+        assertThat(state(p.id())).isEqualTo("COMPLETED");
+        assertThat(events(p.id())).doesNotContain("RELEASING->REVERSED");
+    }
+
+    @Test
+    @DisplayName("REQ-PF-013 outside RELEASING an old attempt's FundsCaptured is still ignored")
+    void oldCaptureAnswerWhileCapturingIsIgnored() {
+        Payment p = newPayment();
+        advanceTo(p.id(), PaymentState.CAPTURING);
+        passDeadlines();
+        sweepRelayed(); // capture attempt 2
+        long version = version(p.id());
+
+        deliver(reply(new FundsCaptured(p.id()), 1));
+
+        assertThat(state(p.id())).isEqualTo("CAPTURING");
+        assertThat(version(p.id())).isEqualTo(version);
     }
 
     // ---- late replies after re-sends ----
@@ -238,7 +277,7 @@ class PaymentSweeperTest extends PaymentIntegrationTest {
     void oldAttemptIgnoredNewAttemptAccepted() {
         Payment p = newPayment();
         clock.advance(Duration.ofSeconds(11));
-        sweeper.sweep();
+        sweepRelayed();
         long version = version(p.id());
 
         deliver(reply(new FundsReserved(p.id()), 1));
@@ -262,7 +301,7 @@ class PaymentSweeperTest extends PaymentIntegrationTest {
         Payment p = newPayment();
         for (int i = 0; i < 4; i++) {
             passDeadlines();
-            sweeper.sweep();
+            sweepRelayed();
         }
         assertThat(state(p.id())).isEqualTo("RELEASING");
         long version = version(p.id());
@@ -287,7 +326,7 @@ class PaymentSweeperTest extends PaymentIntegrationTest {
         // the RiskApproved never reached the handler: nothing is delivered
         clock.advance(Duration.ofSeconds(6)); // the risk deadline is 5 s
 
-        assertThat(sweeper.sweep()).isEqualTo(1);
+        assertThat(sweepRelayed()).isEqualTo(1);
 
         assertThat(commands(p.id(), CheckRisk.class)).hasSize(2);
         assertThat(commands(p.id(), CheckRisk.class).get(1).attempt()).isEqualTo(2);
@@ -312,7 +351,7 @@ class PaymentSweeperTest extends PaymentIntegrationTest {
         Payment fresh = newPayment(); // its deadline lies 10 s after the new now
         Snapshot before = snapshotAll();
 
-        assertThat(sweeper.sweep()).isZero();
+        assertThat(sweepRelayed()).isZero();
 
         assertThat(snapshotAll()).isEqualTo(before);
         assertThat(stepAttempts(fresh.id())).isEqualTo(1);
@@ -328,13 +367,13 @@ class PaymentSweeperTest extends PaymentIntegrationTest {
         }
         clock.advance(Duration.ofSeconds(100)); // all 60 are overdue
 
-        assertThat(sweeper.sweep()).isEqualTo(50);
+        assertThat(sweepRelayed()).isEqualTo(50);
 
         for (int i = 0; i < 60; i++) {
             assertThat(stepAttempts(ids.get(i)))
                     .as("payment %d (created %d s after the first)", i, i)
                     .isEqualTo(i < 50 ? 2 : 1);
         }
-        assertThat(sweeper.sweep()).isEqualTo(10);
+        assertThat(sweepRelayed()).isEqualTo(10);
     }
 }

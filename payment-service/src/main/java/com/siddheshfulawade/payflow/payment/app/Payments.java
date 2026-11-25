@@ -37,4 +37,10 @@ public interface Payments {
      * meantime, and when another transaction holds it: that one is moving it, so there is nothing to wait for.
      */
     Optional<Payment> lockOverdue(UUID id, Instant now);
+
+    /**
+     * Whether a command of the payment is still in the outbox, not marked as published. Asked by whoever holds the
+     * payment's lock: every append comes with an update of the row, so no new command can appear meanwhile.
+     */
+    boolean hasUnsentCommand(UUID id);
 }

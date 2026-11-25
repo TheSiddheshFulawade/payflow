@@ -51,6 +51,7 @@ class PaymentSweeperConcurrencyTest extends PaymentIntegrationTest {
             for (int i = 0; i < 30; i++) {
                 ids.add(newPayment().id());
             }
+            relayAll();
             clock.advance(Duration.ofSeconds(11));
 
             List<Object> results = concurrently(List.of(sweepOn(sweeper), sweepOn(sweeper), sweepOn(sweeper)), TIMEOUT);
@@ -73,6 +74,7 @@ class PaymentSweeperConcurrencyTest extends PaymentIntegrationTest {
     @DisplayName("REQ-PF-014 a row another transaction holds is skipped, not waited for, and handled by the next sweep")
     void lockedRowIsSkipped() throws Exception {
         Payment p = newPayment();
+        relayAll();
         clock.advance(Duration.ofSeconds(11));
 
         try (Connection other = dataSource.getConnection()) {
@@ -93,7 +95,7 @@ class PaymentSweeperConcurrencyTest extends PaymentIntegrationTest {
             }
         }
 
-        assertThat(sweeper.sweep()).isEqualTo(1);
+        assertThat(sweepRelayed()).isEqualTo(1);
         assertThat(stepAttempts(p.id())).isEqualTo(2);
     }
 
@@ -102,6 +104,7 @@ class PaymentSweeperConcurrencyTest extends PaymentIntegrationTest {
     void sweeperAndReplyRace() throws Exception {
         for (int round = 0; round < 15; round++) {
             Payment p = newPayment();
+            relayAll();
             clock.advance(Duration.ofSeconds(11)); // overdue, and its reply is on the way
             Envelope reserved = reply(new FundsReserved(p.id()), 1);
 
@@ -135,6 +138,61 @@ class PaymentSweeperConcurrencyTest extends PaymentIntegrationTest {
             assertThat(version(p.id()))
                     .as("one move: the reply's or the re-send's")
                     .isEqualTo(2);
+        }
+    }
+
+    @Test
+    @DisplayName(
+            "REQ-PF-014 a reply racing a postponing sweep: always RISK_CHECKING on attempt 1, one transition event")
+    void replyAgainstPostponement() throws Exception {
+        for (int round = 0; round < 15; round++) {
+            Payment p = newPayment(); // its ReserveFunds is unsent (no relayAll): the sweeper postpones
+            clock.advance(Duration.ofSeconds(11));
+            Envelope reserved = reply(new FundsReserved(p.id()), 1);
+
+            List<Object> outcomes = concurrently(
+                    List.of(sweepOn(sweeper), (Callable<IdempotentConsumer.Outcome>) () -> deliver(reserved)), TIMEOUT);
+            if (outcomes.get(1) instanceof Throwable lost) {
+                assertThat(lost).isInstanceOf(StaleVersionException.class);
+                deliver(reserved); // redelivered, as Kafka does
+            }
+
+            assertThat(outcomes.get(0)).isInstanceOf(Integer.class);
+            assertThat(state(p.id())).isEqualTo("RISK_CHECKING");
+            assertThat(stepAttempts(p.id()))
+                    .as("a postponement is not an attempt")
+                    .isEqualTo(1);
+            assertThat(events(p.id()).stream().filter("RESERVING->RISK_CHECKING"::equals))
+                    .as("the reply's transition is audited once")
+                    .hasSize(1);
+            assertThat(commands(p.id(), ReserveFunds.class)).hasSize(1);
+            assertThat(commands(p.id(), CheckRisk.class)).hasSize(1);
+        }
+    }
+
+    @Test
+    @DisplayName(
+            "REQ-PF-014 the relay marking the command sent racing a sweep: one postponement or one re-send, never both")
+    void relayAgainstSweep() throws Exception {
+        for (int round = 0; round < 15; round++) {
+            Payment p = newPayment();
+            clock.advance(Duration.ofSeconds(11));
+            long versionBefore = version(p.id());
+
+            concurrently(
+                    List.<Callable<?>>of(sweepOn(sweeper), () -> {
+                        relayAll();
+                        return 0;
+                    }),
+                    TIMEOUT);
+
+            assertThat(version(p.id())).as("exactly one move").isEqualTo(versionBefore + 1);
+            int attempts = stepAttempts(p.id());
+            assertThat(attempts).isIn(1, 2);
+            assertThat(commands(p.id(), ReserveFunds.class))
+                    .as("attempt %d: a postponement adds no command, a re-send adds one", attempts)
+                    .hasSize(attempts);
+            assertThat(state(p.id())).isEqualTo("RESERVING");
         }
     }
 }

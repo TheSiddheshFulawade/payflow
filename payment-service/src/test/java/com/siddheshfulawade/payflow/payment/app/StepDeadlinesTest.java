@@ -13,6 +13,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /** Step deadlines with backoff: min(base x 2^(attempt - 1), cap) (SPEC section 4, REQ-PF-012). */
 class StepDeadlinesTest {
@@ -69,23 +70,77 @@ class StepDeadlinesTest {
         }
     }
 
-    @Test
-    @DisplayName("REQ-PF-012 even a huge cap and a long base cannot overflow: the result is the cap")
-    void hugeCapDoesNotOverflow() {
-        Duration cap = Duration.ofSeconds(Long.MAX_VALUE / 4);
-        var deadlines = new StepDeadlines(Duration.ofHours(1), S, S, S, cap);
+    private static final Duration TEN_MINUTES = Duration.ofMinutes(10);
 
-        assertThat(deadlines.in(PaymentState.RESERVING, 1)).contains(Duration.ofHours(1));
-        assertThat(deadlines.in(PaymentState.RESERVING, 100)).contains(cap);
-        assertThat(deadlines.in(PaymentState.RESERVING, Integer.MAX_VALUE)).contains(cap);
+    @Test
+    @DisplayName("REQ-PF-012 the largest allowed settings (10 min) cannot overflow: the result is the cap")
+    void largestAllowedValuesDoNotOverflow() {
+        var deadlines = new StepDeadlines(TEN_MINUTES, TEN_MINUTES, TEN_MINUTES, TEN_MINUTES, TEN_MINUTES);
+
+        assertThat(deadlines.in(PaymentState.RESERVING, 1)).contains(TEN_MINUTES);
+        assertThat(deadlines.in(PaymentState.RESERVING, 100)).contains(TEN_MINUTES);
+        assertThat(deadlines.in(PaymentState.RELEASING, Integer.MAX_VALUE)).contains(TEN_MINUTES);
     }
 
     @Test
-    @DisplayName("REQ-PF-012 a cap below the base wins from the first attempt")
-    void capBelowBase() {
-        var deadlines = new StepDeadlines(Duration.ofSeconds(10), S, S, S, Duration.ofSeconds(4));
+    @DisplayName("REQ-PF-012 the defaults are valid: every base and the cap are at most 10 min, the cap is the largest")
+    void defaultsAreValid() {
+        assertThat(defaults().cap()).isLessThanOrEqualTo(TEN_MINUTES);
+        assertThat(Stream.of(
+                        defaults().reserve(),
+                        defaults().risk(),
+                        defaults().capture(),
+                        defaults().release()))
+                .allSatisfy(
+                        base -> assertThat(base).isLessThanOrEqualTo(defaults().cap()));
+    }
 
-        assertThat(deadlines.in(PaymentState.RESERVING, 1)).contains(Duration.ofSeconds(4));
+    @Test
+    @DisplayName("REQ-PF-012 a cap equal to a base is allowed: that step never backs off")
+    void capEqualToBaseIsAllowed() {
+        var deadlines = new StepDeadlines(S, S, S, S, S);
+
+        assertThat(deadlines.in(PaymentState.CAPTURING, 5)).contains(S);
+    }
+
+    @ParameterizedTest(name = "base at position {0} above the cap")
+    @ValueSource(ints = {0, 1, 2, 3})
+    @DisplayName("REQ-PF-012 a cap below any base is refused: a step would wait less than its first deadline")
+    void capBelowAnyBaseIsRefused(int position) {
+        Duration[] values = {Duration.ofSeconds(4), Duration.ofSeconds(4), Duration.ofSeconds(4), Duration.ofSeconds(4)
+        };
+        values[position] = Duration.ofSeconds(10);
+
+        assertThatIllegalArgumentException()
+                .isThrownBy(() -> new StepDeadlines(values[0], values[1], values[2], values[3], Duration.ofSeconds(9)))
+                .withMessageContaining("payflow.payment.deadlines.");
+    }
+
+    @ParameterizedTest(name = "value at position {0} above 10 min")
+    @ValueSource(ints = {0, 1, 2, 3, 4})
+    @DisplayName("REQ-PF-012 no base and no cap may exceed 10 min: a mistyped setting would park payments for hours")
+    void anythingAboveTenMinutesIsRefused(int position) {
+        Duration[] values = {S, S, S, S, TEN_MINUTES};
+        values[position] = TEN_MINUTES.plusSeconds(1);
+        if (position < 4) {
+            values[4] = TEN_MINUTES.plusSeconds(1); // keep cap >= base, so only the 10 min limit can refuse
+        }
+
+        assertThatIllegalArgumentException()
+                .isThrownBy(() -> new StepDeadlines(values[0], values[1], values[2], values[3], values[4]))
+                .withMessageContaining("payflow.payment.deadlines.");
+    }
+
+    @ParameterizedTest(name = "base at position {0} = 10 min")
+    @ValueSource(ints = {0, 1, 2, 3})
+    @DisplayName("REQ-PF-012 exactly 10 min is allowed for a base, with a cap of 10 min")
+    void tenMinutesIsAllowed(int position) {
+        Duration[] values = {S, S, S, S};
+        values[position] = TEN_MINUTES;
+
+        var deadlines = new StepDeadlines(values[0], values[1], values[2], values[3], TEN_MINUTES);
+
+        assertThat(deadlines.cap()).isEqualTo(TEN_MINUTES);
     }
 
     @ParameterizedTest

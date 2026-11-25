@@ -12,7 +12,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.StreamSupport;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.utils.Utils;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -86,6 +88,42 @@ class VelocityDownIntegrationTest extends RiskIntegrationTest {
                 .as("no inbox row: a re-send is not taken for a duplicate")
                 .isZero();
         assertThat(outboxRows()).as("no reply").isZero();
+    }
+
+    @Test
+    @DisplayName("REQ-PF-032 the dead-letter record of a velocity-down command has no payer, no amount and no stack"
+            + " trace in its headers")
+    void parkedRecordHeadersCarryNoAccountData() {
+        UUID payment = UUID.randomUUID();
+        String payer = newPayer();
+        long amount = 1_234_567;
+        Envelope command = check(payment, payer, amount);
+        // the cause quotes payer and amount, as library exceptions do: none of it may reach a header
+        velocity.unavailableAfter(Duration.ofMillis(100), "no answer for payer " + payer + " amount " + amount);
+
+        send(command);
+
+        await().atMost(TIMEOUT)
+                .pollInterval(Duration.ofMillis(500))
+                .untilAsserted(() -> assertThat(parked(command)).isTrue());
+        ConsumerRecord<String, String> record = kafka.readRaw(Topics.deadLetter(Topics.RISK_COMMANDS)).stream()
+                .filter(r -> r.value().contains(command.messageId().toString()))
+                .findFirst()
+                .orElseThrow();
+        List<Header> headers =
+                StreamSupport.stream(record.headers().spliterator(), false).toList();
+        assertThat(headers)
+                .as("the dead-letter headers exist (exception class, original topic)")
+                .isNotEmpty();
+        assertThat(headers)
+                .extracting(Header::key)
+                .as("no stack trace header")
+                .noneMatch(key -> key.toLowerCase().contains("stacktrace"));
+        assertThat(headers).allSatisfy(header -> {
+            String value = new String(header.value(), StandardCharsets.UTF_8);
+            assertThat(value).as("header %s", header.key()).doesNotContain(payer);
+            assertThat(value).as("header %s", header.key()).doesNotContain(Long.toString(amount));
+        });
     }
 
     @Test

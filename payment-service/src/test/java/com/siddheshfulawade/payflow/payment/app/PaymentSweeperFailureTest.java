@@ -51,7 +51,7 @@ class PaymentSweeperFailureTest extends PaymentIntegrationTest {
         makeOutboxInsertFailFor(broken.id());
         long brokenVersion = version(broken.id());
 
-        int handled = sweeper.sweep();
+        int handled = sweepRelayed();
 
         assertThat(handled).as("only the two healthy payments").isEqualTo(2);
         assertThat(stepAttempts(first.id())).isEqualTo(2);
@@ -68,7 +68,7 @@ class PaymentSweeperFailureTest extends PaymentIntegrationTest {
                         .doesNotContain("bob"));
 
         dropFailureTriggers();
-        assertThat(sweeper.sweep())
+        assertThat(sweepRelayed())
                 .as("the broken payment is not lost: its deadline still stands")
                 .isEqualTo(1);
         assertThat(stepAttempts(broken.id())).isEqualTo(2);
@@ -82,13 +82,13 @@ class PaymentSweeperFailureTest extends PaymentIntegrationTest {
         makeOutboxInsertFail(Topics.WALLET_COMMANDS);
         Snapshot before = snapshotAll();
 
-        int handled = sweeper.sweep();
+        int handled = sweepRelayed();
 
         assertThat(handled).isZero();
         assertThat(snapshotAll()).isEqualTo(before);
 
         dropFailureTriggers();
-        assertThat(sweeper.sweep()).isEqualTo(1);
+        assertThat(sweepRelayed()).isEqualTo(1);
         assertThat(stepAttempts(p.id())).isEqualTo(2);
     }
 
@@ -98,21 +98,21 @@ class PaymentSweeperFailureTest extends PaymentIntegrationTest {
         Payment p = newPayment();
         for (int i = 0; i < 3; i++) {
             clock.advance(Duration.ofSeconds(31));
-            sweeper.sweep();
+            sweepRelayed();
         }
         assertThat(stepAttempts(p.id())).isEqualTo(4);
         clock.advance(Duration.ofSeconds(31));
         makeOutboxInsertFail(Topics.WALLET_COMMANDS);
         Snapshot before = snapshotAll();
 
-        assertThat(sweeper.sweep()).isZero();
+        assertThat(sweepRelayed()).isZero();
 
         assertThat(snapshotAll()).isEqualTo(before);
         assertThat(state(p.id())).isEqualTo("RESERVING");
         assertThat(events(p.id())).doesNotContain("RESERVING->RELEASING");
 
         dropFailureTriggers();
-        assertThat(sweeper.sweep()).isEqualTo(1);
+        assertThat(sweepRelayed()).isEqualTo(1);
         assertThat(state(p.id())).isEqualTo("RELEASING");
         assertThat(commands(p.id(), ReleaseFunds.class)).hasSize(1);
     }

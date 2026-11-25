@@ -12,12 +12,19 @@ import java.util.Optional;
  */
 public record StepDeadlines(Duration reserve, Duration risk, Duration capture, Duration release, Duration cap) {
 
+    /** A mistyped setting must not park payments, and the money they hold, for hours. */
+    static final Duration MAX = Duration.ofMinutes(10);
+
     public StepDeadlines {
-        positive(reserve, "reserve");
-        positive(risk, "risk");
-        positive(capture, "capture");
-        positive(release, "release");
-        positive(cap, "cap");
+        requireInRange(reserve, "reserve");
+        requireInRange(risk, "risk");
+        requireInRange(capture, "capture");
+        requireInRange(release, "release");
+        requireInRange(cap, "cap");
+        requireAtMostCap(reserve, "reserve", cap);
+        requireAtMostCap(risk, "risk", cap);
+        requireAtMostCap(capture, "capture", cap);
+        requireAtMostCap(release, "release", cap);
     }
 
     /** min(base x 2^(attempt - 1), cap). Empty for states that wait for nothing: they have no deadline. */
@@ -31,19 +38,25 @@ public record StepDeadlines(Duration reserve, Duration risk, Duration capture, D
         };
     }
 
-    /** Stops at the cap instead of computing 2^attempt: a release may reach any attempt number. */
+    /** Stops at the cap instead of computing 2^attempt, which overflows: a release may reach any attempt number. */
     private Duration backoff(Duration base, int attempt) {
         Duration wait = base;
         for (int i = 1; i < attempt && wait.compareTo(cap) < 0; i++) {
-            // wait >= cap - wait means "doubled, it reaches the cap", without an overflow
-            wait = wait.compareTo(cap.minus(wait)) >= 0 ? cap : wait.plus(wait);
+            wait = wait.multipliedBy(2);
         }
         return wait.compareTo(cap) < 0 ? wait : cap;
     }
 
-    private static void positive(Duration value, String name) {
-        if (value == null || value.isNegative() || value.isZero()) {
-            throw new IllegalArgumentException("payflow.payment.deadlines." + name + " must be positive");
+    private static void requireInRange(Duration value, String name) {
+        if (value == null || !value.isPositive() || value.compareTo(MAX) > 0) {
+            throw new IllegalArgumentException(
+                    "payflow.payment.deadlines." + name + " must be positive and at most " + MAX);
+        }
+    }
+
+    private static void requireAtMostCap(Duration base, String name, Duration cap) {
+        if (base.compareTo(cap) > 0) {
+            throw new IllegalArgumentException("payflow.payment.deadlines." + name + " must not be above the cap");
         }
     }
 }

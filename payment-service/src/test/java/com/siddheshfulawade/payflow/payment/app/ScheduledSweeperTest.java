@@ -24,6 +24,7 @@ class ScheduledSweeperTest extends PaymentIntegrationTest {
     void scheduleResendsOverdueSteps() {
         clock.set(Instant.parse("2026-03-01T12:00:00Z"));
         Payment p = newPayment();
+        relayAll(); // the command was published; an unpublished one would only be waited for
 
         clock.advance(Duration.ofSeconds(11));
 

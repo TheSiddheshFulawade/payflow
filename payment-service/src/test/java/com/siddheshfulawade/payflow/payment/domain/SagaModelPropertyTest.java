@@ -2,6 +2,7 @@ package com.siddheshfulawade.payflow.payment.domain;
 
 import static com.siddheshfulawade.payflow.payment.support.PaymentFixtures.NOW;
 import static com.siddheshfulawade.payflow.payment.support.PaymentFixtures.payment;
+import static org.assertj.core.api.Assertions.assertThat;
 
 import com.siddheshfulawade.payflow.contracts.CaptureFailed;
 import com.siddheshfulawade.payflow.contracts.CaptureFunds;
@@ -18,9 +19,13 @@ import com.siddheshfulawade.payflow.contracts.ReserveFunds;
 import com.siddheshfulawade.payflow.contracts.RiskApproved;
 import com.siddheshfulawade.payflow.contracts.RiskRejected;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Random;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import net.jqwik.api.Arbitraries;
 import net.jqwik.api.Arbitrary;
 import net.jqwik.api.Combinators;
@@ -28,20 +33,25 @@ import net.jqwik.api.ForAll;
 import net.jqwik.api.Property;
 import net.jqwik.api.Provide;
 import net.jqwik.api.ShrinkingMode;
+import net.jqwik.api.lifecycle.AfterProperty;
+import net.jqwik.api.lifecycle.BeforeProperty;
+import net.jqwik.api.statistics.Statistics;
 
 /**
  * The real {@link SagaStateMachine} against a small model of everything around it (REQ-PF-010 to 014): a wallet that
  * keeps one hold per payment (permanent reserve decision, tombstone after a release, a release of a captured hold is
  * answered FundsCaptured, a refused capture leaves the hold RESERVED), a risk service with a permanent decision, and
- * a network that loses, duplicates, reorders and delays commands and replies. The payment side may also crash
- * before its commit (nothing changes, the message stays), publish late (outbox lag) and time out at any moment.
+ * a network that loses (and later returns), duplicates, reorders and delays commands and replies. The payment side may
+ * also crash before its commit (nothing changes, the message stays), publish late (outbox lag) and time out at any
+ * moment. The wallet's capture may be refused once and accepted later.
  *
  * <p>Safety, checked after every single step, also while every remaining message is delivered late after the end:
- * one terminal state, never left; attempts only grow within a state; at most one capture; COMPLETED only when the
+ * one terminal state, never left; attempts only grow within a state; at most one capture; COMPLETED if and only if the
  * wallet captured; REVERSED and REJECTED only when nothing is held or captured; a reply is accepted only for the
- * current attempt; every command equals the one built from the row, and is sent only in its own state, and CaptureFunds
- * never after a ReleaseFunds. Liveness: after a fair phase (everything delivered, timeouts fire) the payment is
- * terminal within a bounded number of rounds.
+ * current attempt, except FundsReleased and FundsCaptured while RELEASING (final facts of the hold); every command
+ * equals the one built from the row, and is sent only in its own state, and CaptureFunds never after a ReleaseFunds.
+ * Liveness: after a fair phase (everything delivered, timeouts fire) the payment is terminal within a bounded number of
+ * rounds, also when every round trip spans several timeouts.
  */
 class SagaModelPropertyTest {
 
@@ -56,10 +66,20 @@ class SagaModelPropertyTest {
         CAPTURED
     }
 
-    /** kind 0-4 deliver, 5 lose, 6 duplicate, 7 time out, 8 relay the outbox, 9 crash before the commit */
+    /**
+     * kind 0-4 deliver, 5 lose, 6 duplicate, 7 time out, 8 relay the outbox, 9 crash before the commit, 10 a lost
+     * message turns up again
+     */
     private record Op(int kind, int pick) {}
 
-    private record Scenario(boolean reserveOk, boolean riskOk, boolean captureOk, List<Op> ops, long seed) {}
+    /**
+     * @param captureOutcomes whether the n-th CaptureFunds the wallet serves succeeds (n modulo the list size): the
+     *     outcome may change between attempts, e.g. refused once and accepted later
+     * @param latency 0: the fair phase answers within one timeout; 1 to 4: every round trip spans that many timeouts,
+     *     so the answer always belongs to an older attempt when it arrives
+     */
+    private record Scenario(
+            boolean reserveOk, boolean riskOk, List<Boolean> captureOutcomes, int latency, List<Op> ops, long seed) {}
 
     /** The attempt is the one the command carried; replies copy it, as wallet and risk do. */
     private record Msg(Message payload, int attempt) {}
@@ -69,18 +89,74 @@ class SagaModelPropertyTest {
         // true four times in five, so that the happy path is reached often
         Arbitrary<Boolean> mostlyYes = Arbitraries.integers().between(0, 4).map(i -> i != 0);
         Arbitrary<Op> op = Combinators.combine(
-                        Arbitraries.integers().between(0, 9),
+                        Arbitraries.integers().between(0, 10),
                         Arbitraries.integers().between(0, 999))
                 .as(Op::new);
-        return Combinators.combine(mostlyYes, mostlyYes, mostlyYes, op.list().ofMaxSize(80), Arbitraries.longs())
+        Arbitrary<List<Boolean>> captureOutcomes = mostlyYes.list().ofSize(4);
+        Arbitrary<Integer> latency = Arbitraries.integers().between(0, 4);
+        return Combinators.combine(
+                        mostlyYes,
+                        mostlyYes,
+                        captureOutcomes,
+                        latency,
+                        op.list().ofMaxSize(80),
+                        Arbitraries.longs())
                 .as(Scenario::new);
     }
 
-    // REQ-PF-010, 011, 012, 013: safety at every step, and liveness after a fair phase
+    // REQ-PF-010, 011, 012, 013: safety at every step, and liveness after a fair phase (also a slow one)
     @Property(tries = 1500, shrinking = ShrinkingMode.BOUNDED)
     void safetyAtEveryStepAndTerminalAfterAFairPhase(@ForAll("scenarios") Scenario scenario) {
-        new World(scenario).run();
+        World world = new World(scenario);
+
+        try {
+            world.run();
+        } catch (Throwable failure) {
+            // the real failure must stay the first thing Maven prints: sampledTheRarePaths then stays quiet
+            FAILED.set(true);
+            throw failure;
+        }
+
+        // The rare paths are what the property is for: label them (jqwik prints the table), and fail when a run never
+        // reaches one (see sampledTheRarePaths), so that a generator change that under-samples them is noticed.
+        Statistics.label("latency").collect(scenario.latency());
+        world.paths().forEach(path -> {
+            Statistics.label("rare paths").collect(path);
+            REACHED.add(path);
+        });
     }
+
+    private static final Set<String> REACHED = ConcurrentHashMap.newKeySet();
+
+    private static final AtomicBoolean FAILED = new AtomicBoolean();
+
+    @BeforeProperty
+    void forgetEarlierRuns() {
+        REACHED.clear();
+        FAILED.set(false);
+    }
+
+    /** Each rare path at least once in the 1500 tries (shares measured: 1 % to 7 %); skipped when the property failed. */
+    @AfterProperty
+    void sampledTheRarePaths() {
+        if (FAILED.get()) {
+            return;
+        }
+        assertThat(REACHED)
+                .as("rare paths reached by at least one of the generated scenarios")
+                .contains(
+                        PATH_RELEASE_FOUND_CAPTURED,
+                        PATH_RELEASE_REVERSED,
+                        PATH_LATE_ENDS_RELEASE,
+                        PATH_LATE_IGNORED,
+                        PATH_LOST_RETURNS);
+    }
+
+    private static final String PATH_RELEASE_FOUND_CAPTURED = "RELEASING -> COMPLETED";
+    private static final String PATH_RELEASE_REVERSED = "RELEASING -> REVERSED";
+    private static final String PATH_LATE_ENDS_RELEASE = "old attempt's answer ended the release";
+    private static final String PATH_LATE_IGNORED = "reply of an old attempt ignored";
+    private static final String PATH_LOST_RETURNS = "a lost message came back";
 
     private static final class World {
         private final Scenario scenario;
@@ -94,6 +170,8 @@ class SagaModelPropertyTest {
         private final List<Msg> limbo = new ArrayList<>();
 
         private final List<String> history = new ArrayList<>();
+        private final Set<String> paths = new LinkedHashSet<>();
+        private int captureCalls;
         private PaymentState terminalSeen;
         private int terminalEntries;
         private boolean releaseSent;
@@ -114,10 +192,24 @@ class SagaModelPropertyTest {
                 check(op.toString());
             }
 
-            fairPhase();
-            require(payment.state().terminal(), "not terminal after " + FAIR_ROUNDS + " fair rounds");
+            if (scenario.latency() == 0) {
+                fairPhase();
+            } else {
+                slowFairPhase(scenario.latency());
+            }
+            require(
+                    payment.state().terminal(),
+                    "not terminal after " + FAIR_ROUNDS + " fair rounds, latency " + scenario.latency());
+            // COMPLETED if and only if the wallet captured: the capture outcome may differ from attempt to attempt
+            require(
+                    (payment.state() == PaymentState.COMPLETED) == (hold == Hold.CAPTURED),
+                    "ended " + payment.state() + " but the hold is " + hold);
 
             lateDeliveryOfEverythingLeft();
+        }
+
+        Set<String> paths() {
+            return paths;
         }
 
         // ---- the world ----
@@ -143,6 +235,13 @@ class SagaModelPropertyTest {
                 case 7 -> sweep(true);
                 case 8 -> relay();
                 case 9 -> crash(op.pick());
+                case 10 -> {
+                    // a message that seemed lost arrives, possibly in the middle of a later step
+                    if (!limbo.isEmpty()) {
+                        paths.add(PATH_LOST_RETURNS);
+                        network.add(limbo.remove(op.pick() % limbo.size()));
+                    }
+                }
                 default -> throw new IllegalStateException("kind " + op.kind());
             }
         }
@@ -184,6 +283,30 @@ class SagaModelPropertyTest {
             }
         }
 
+        /**
+         * Everything is delivered, but every answer needs {@code latency} timeouts to come back: when it arrives, the
+         * step it answers is long over (or re-sent), so it always belongs to an older attempt.
+         */
+        private void slowFairPhase(int latency) {
+            List<Msg> inTransit = new ArrayList<>();
+            for (int round = 1; round <= FAIR_ROUNDS && !payment.state().terminal(); round++) {
+                relay();
+                while (!network.isEmpty()) {
+                    Msg m = network.remove(0);
+                    inTransit.add(m.payload() instanceof Command command ? new Msg(serve(command), m.attempt()) : m);
+                }
+                for (int timeout = 0; timeout < latency && !payment.state().terminal(); timeout++) {
+                    sweep(true);
+                    check("slow timeout");
+                }
+                for (Msg reply : inTransit) {
+                    deliver(reply, true);
+                    check("slow delivery");
+                }
+                inTransit.clear();
+            }
+        }
+
         /** Every message that is still anywhere arrives now, in random order, after the payment ended. */
         private void lateDeliveryOfEverythingLeft() {
             List<Msg> late = new ArrayList<>(limbo);
@@ -215,12 +338,22 @@ class SagaModelPropertyTest {
         private void replyToPayment(Reply reply, int attempt, boolean commit) {
             Optional<Transition> transition = SagaStateMachine.on(payment, reply, attempt);
             if (transition.isEmpty()) {
+                if (!payment.state().terminal() && attempt != payment.stepAttempts()) {
+                    paths.add(PATH_LATE_IGNORED);
+                }
                 return;
             }
             require(!payment.state().terminal(), "a terminal payment accepted " + reply);
+            // Only the wallet's final facts about the hold count for any attempt, and only while releasing: a release
+            // is re-sent forever, so its answer is always older than the attempt that is current when it arrives.
+            boolean finalFactOfTheHold = payment.state() == PaymentState.RELEASING
+                    && (reply instanceof FundsReleased || reply instanceof FundsCaptured);
             require(
-                    attempt == payment.stepAttempts(),
+                    attempt == payment.stepAttempts() || finalFactOfTheHold,
                     "accepted " + reply + " of attempt " + attempt + " on attempt " + payment.stepAttempts());
+            if (attempt != payment.stepAttempts()) {
+                paths.add(PATH_LATE_ENDS_RELEASE);
+            }
             if (commit) {
                 applyTransition(transition.get());
             }
@@ -286,6 +419,9 @@ class SagaModelPropertyTest {
                 require(next.stepAttempts() == 1, "a new step does not start on attempt 1");
             }
             require(next.version() == payment.version() + 1, "version");
+            if (payment.state() == PaymentState.RELEASING && next.state().terminal()) {
+                paths.add("RELEASING -> " + next.state());
+            }
             if (next.state().terminal()) {
                 terminalEntries++;
                 require(terminalEntries == 1, "second terminal state");
@@ -348,7 +484,9 @@ class SagaModelPropertyTest {
                 case NONE, RELEASED, REJECTED -> new CaptureFailed(payment.id(), "NO_ACTIVE_HOLD");
                 case CAPTURED -> new FundsCaptured(payment.id());
                 case RESERVED -> {
-                    if (!scenario.captureOk()) {
+                    boolean accepted = scenario.captureOutcomes()
+                            .get(captureCalls++ % scenario.captureOutcomes().size());
+                    if (!accepted) {
                         // the hold stays RESERVED
                         yield new CaptureFailed(payment.id(), "PAYEE_FROZEN");
                     }
@@ -385,9 +523,10 @@ class SagaModelPropertyTest {
             require(captures <= 1, "captured more than once");
             if (state == PaymentState.COMPLETED) {
                 require(hold == Hold.CAPTURED && captures == 1, "COMPLETED but the wallet did not capture once");
-                require(
-                        scenario.reserveOk() && scenario.riskOk() && scenario.captureOk(),
-                        "COMPLETED although a step was refused");
+                // A refused capture does not forbid COMPLETED: the hold stays, and a later capture (a re-send, a
+                // duplicate or a late copy) may succeed. What can never be COMPLETED is a payment whose reserve or
+                // risk check was refused, because it never gets to capture.
+                require(scenario.reserveOk() && scenario.riskOk(), "COMPLETED although reserve or risk was refused");
             }
             if (state == PaymentState.REVERSED || state == PaymentState.REJECTED) {
                 require(

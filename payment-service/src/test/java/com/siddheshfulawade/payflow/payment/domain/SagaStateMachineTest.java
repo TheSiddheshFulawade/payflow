@@ -88,16 +88,27 @@ class SagaStateMachineTest {
                                         .map(replyAttempt -> Arguments.of(state, stepAttempts, reply, replyAttempt)))));
     }
 
+    /**
+     * While RELEASING, FundsReleased and FundsCaptured are final facts about the hold (REVERSED / COMPLETED): they
+     * count whichever attempt they answer, because a release is re-sent forever and its answer is always older than
+     * the attempt that is current when it arrives.
+     */
+    private static boolean finalFactOfTheHold(PaymentState state, Reply reply) {
+        return state == PaymentState.RELEASING && (reply instanceof FundsReleased || reply instanceof FundsCaptured);
+    }
+
     @ParameterizedTest(name = "{0} on attempt {1} + {2} attempt {3}")
     @MethodSource("everyStateReplyAndAttempt")
-    @DisplayName("REQ-PF-010 only the listed transitions exist, and only for the current attempt; all else is ignored")
+    @DisplayName("REQ-PF-010 only the listed transitions exist, for the current attempt (RELEASING: any attempt for"
+            + " FundsReleased and FundsCaptured); all else is ignored")
     void onlyListedTransitionsExist(PaymentState state, int stepAttempts, Reply reply, int replyAttempt) {
         Payment payment = payment(state, stepAttempts);
 
         Optional<Transition> result = SagaStateMachine.on(payment, reply, replyAttempt);
 
         Optional<Expected> expected = listed(state, reply);
-        if (replyAttempt != stepAttempts || expected.isEmpty()) {
+        boolean attemptCounts = replyAttempt == stepAttempts || finalFactOfTheHold(state, reply);
+        if (!attemptCounts || expected.isEmpty()) {
             assertThat(result)
                     .as("%s attempt %d + %s attempt %d", state, stepAttempts, reply, replyAttempt)
                     .isEmpty();
@@ -202,6 +213,31 @@ class SagaStateMachineTest {
         assertThat(SagaStateMachine.on(payment, new FundsReserved(payment.id()), 2))
                 .map(Transition::to)
                 .contains(PaymentState.RISK_CHECKING);
+    }
+
+    @Test
+    @DisplayName("REQ-PF-013 a release re-sent to attempt 7 is still ended by the answer to attempt 2")
+    void anOldReleaseAnswerEndsTheRelease() {
+        Payment payment = payment(PaymentState.RELEASING, 7);
+
+        assertThat(SagaStateMachine.on(payment, new FundsReleased(payment.id()), 2))
+                .map(Transition::to)
+                .contains(PaymentState.REVERSED);
+        assertThat(SagaStateMachine.on(payment, new FundsCaptured(payment.id()), 2))
+                .map(Transition::to)
+                .contains(PaymentState.COMPLETED);
+    }
+
+    @Test
+    @DisplayName("REQ-PF-013 outside RELEASING a FundsCaptured of another attempt is still ignored")
+    void anOldCaptureAnswerStillCountsOnlyForItsAttempt() {
+        Payment payment = payment(PaymentState.CAPTURING, 3);
+
+        assertThat(SagaStateMachine.on(payment, new FundsCaptured(payment.id()), 1))
+                .isEmpty();
+        assertThat(SagaStateMachine.on(payment, new FundsCaptured(payment.id()), 3))
+                .map(Transition::to)
+                .contains(PaymentState.COMPLETED);
     }
 
     @Test

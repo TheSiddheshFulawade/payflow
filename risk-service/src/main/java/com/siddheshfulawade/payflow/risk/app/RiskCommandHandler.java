@@ -48,7 +48,8 @@ import org.springframework.transaction.annotation.Transactional;
  *   <li>crash after the commit, before the offset commit: redelivered; the inbox re-sends the stored reply
  *   <li>crash before or after the reply is published: the reply is in the outbox; the relay sends it (again)
  *   <li>velocity cluster unreachable or slow: the call throws and everything rolls back (fail closed). The record is
- *       parked after one delivery, so it holds the partition for 1 s at most; the payment's sweeper re-sends the check
+ *       parked after one delivery and the payment's sweeper re-sends the check. One listener thread serves all
+ *       partitions, so in an outage each instance gets through about one check per second
  *   <li>two copies of a check at once: the second waits on the decision row, then answers from the committed decision
  *   <li>two payments of one payer at once: the second waits on the daily total, then sees the first one's amount
  * </ul>

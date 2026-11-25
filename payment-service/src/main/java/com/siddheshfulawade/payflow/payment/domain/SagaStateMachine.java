@@ -37,9 +37,18 @@ public final class SagaStateMachine {
      *
      * <p>Invariant (REQ-PF-010, 013): a reply acts only on a payment that waits for exactly this reply, on exactly
      * this attempt. Everything else (late, duplicate, another attempt, terminal payment) changes nothing.
+     *
+     * <p>The one exception is the attempt while RELEASING. Both replies that end a release, FundsReleased and
+     * FundsCaptured, state a final fact of the hold: one that is released, rejected or captured never changes again, so
+     * an old answer is as true as a new one. It must count, or a wallet that answers more slowly than the release is
+     * re-sent would never end the payment: every answer would belong to an older attempt.
      */
     public static Optional<Transition> on(Payment payment, Reply reply, int replyAttempt) {
-        if (payment.state().terminal() || replyAttempt != payment.stepAttempts()) {
+        if (payment.state().terminal()) {
+            return Optional.empty();
+        }
+        // a new transition out of RELEASING must also be a final fact of the hold, or be checked against the attempt
+        if (payment.state() != PaymentState.RELEASING && replyAttempt != payment.stepAttempts()) {
             return Optional.empty();
         }
         // spelled out, no default: a new reply type does not compile until it is decided here
@@ -58,9 +67,8 @@ public final class SagaStateMachine {
                         payment,
                         Transition.step(PaymentState.CAPTURING, captureFunds(payment)));
             case RiskRejected r -> onlyIn(PaymentState.RISK_CHECKING, payment, release(payment, r.rule()));
-            // While RELEASING it means "already captured": the capture's reply was lost or late and the payee has the
-            // money, so the payment is COMPLETED, never REVERSED. The attempt numbers of CAPTURING and RELEASING
-            // overlap, so a late reply to the capture itself may also match. It says the same: the money moved.
+            // While RELEASING it means "already captured": the payee has the money, so the payment is COMPLETED, never
+            // REVERSED. It may be the answer to the release or a late answer to the capture: both say the same.
             case FundsCaptured r ->
                 onlyIn(
                         Set.of(PaymentState.CAPTURING, PaymentState.RELEASING),
