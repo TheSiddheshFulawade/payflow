@@ -10,8 +10,6 @@ import com.siddheshfulawade.payflow.contracts.PoisonMessageException;
 import com.siddheshfulawade.payflow.messaging.IdempotentConsumer;
 import com.siddheshfulawade.payflow.risk.RiskServiceApplication;
 import com.siddheshfulawade.payflow.risk.app.RiskCommandHandler;
-import java.io.IOException;
-import java.net.ServerSocket;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDate;
@@ -49,7 +47,7 @@ public abstract class RiskIntegrationTest {
 
     public static final Duration TIMEOUT = Duration.ofSeconds(60);
 
-    private static final int HAZELCAST_PORT = freePort();
+    private static final int HAZELCAST_PORT = Ports.free();
 
     @DynamicPropertySource
     public static void properties(DynamicPropertyRegistry registry) {
@@ -65,14 +63,6 @@ public abstract class RiskIntegrationTest {
         registry.add("payflow.risk.hazelcast.port", () -> String.valueOf(HAZELCAST_PORT));
         registry.add("payflow.risk.hazelcast.members[0]", () -> "127.0.0.1:" + HAZELCAST_PORT);
         registry.add("payflow.risk.hazelcast.bind-address", () -> "127.0.0.1");
-    }
-
-    private static int freePort() {
-        try (ServerSocket socket = new ServerSocket(0)) {
-            return socket.getLocalPort();
-        } catch (IOException e) {
-            throw new IllegalStateException(e);
-        }
     }
 
     @Autowired
