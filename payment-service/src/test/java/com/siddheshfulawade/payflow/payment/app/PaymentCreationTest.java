@@ -64,7 +64,7 @@ class PaymentCreationTest extends PaymentIntegrationTest {
 
         assertThat(outboxCount(created.id())).isEqualTo(1);
         Envelope command = onlyOutbox(created.id(), ReserveFunds.class);
-        assertThat(command.payload()).isEqualTo(new ReserveFunds(created.id(), "carol", 1_234, "INR"));
+        assertThat(command.payload()).isEqualTo(new ReserveFunds(created.id(), "carol", 1_234, "INR", "local"));
         assertThat(command.attempt()).isEqualTo(1);
         assertThat(jdbc.queryForObject(
                         "select topic from outbox where message_key = ?",

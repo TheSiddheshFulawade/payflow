@@ -23,9 +23,16 @@ spring:
         enabled: false
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # The realm that issues the tokens. Boot reads its keys lazily, on the first token, so the service (and its
+          # health check) starts without Keycloak. The audience is payflow.security.audience (default payflow-api).
+          issuer-uri: ${PAYFLOW_ISSUER_URI}
 
 server:
-  # no authentication until PF-07, so loopback only; the container sets RISK_BIND=0.0.0.0
+  # loopback unless told otherwise; the container sets RISK_BIND=0.0.0.0
   address: ${RISK_BIND:127.0.0.1}
   port: 8083
 

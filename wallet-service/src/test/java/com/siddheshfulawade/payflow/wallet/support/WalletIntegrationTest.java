@@ -53,6 +53,9 @@ public abstract class WalletIntegrationTest {
         registry.add("spring.kafka.consumer.auto-offset-reset", () -> "earliest");
         registry.add("spring.flyway.locations", () -> "classpath:db/messaging,classpath:db/migration");
         registry.add("payflow.messaging.relay.enabled", () -> "false");
+        // the resource server trusts the keys of TestIssuer (no Keycloak needed)
+        registry.add("spring.security.oauth2.resourceserver.jwt.issuer-uri", () -> TestIssuer.ISSUER);
+        registry.add("spring.security.oauth2.resourceserver.jwt.jwk-set-uri", TestIssuer::jwksUri);
     }
 
     @Autowired
@@ -80,7 +83,12 @@ public abstract class WalletIntegrationTest {
     }
 
     protected static Envelope reserve(UUID payment, String payer, long amount, int attempt) {
-        return Envelope.of(new ReserveFunds(payment, payer, amount, "INR"), attempt, Clock.systemUTC());
+        return reserveAs("owner-" + payer, payment, payer, amount, attempt);
+    }
+
+    /** A reserve sent on behalf of {@code requester} (the JWT subject of the payment creator). */
+    protected static Envelope reserveAs(String requester, UUID payment, String payer, long amount, int attempt) {
+        return Envelope.of(new ReserveFunds(payment, payer, amount, "INR", requester), attempt, Clock.systemUTC());
     }
 
     protected static Envelope release(UUID payment, String payer, long amount) {

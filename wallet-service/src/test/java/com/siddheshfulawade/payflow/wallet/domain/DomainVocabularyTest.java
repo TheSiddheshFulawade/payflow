@@ -29,7 +29,7 @@ class DomainVocabularyTest {
     }
 
     @Test
-    @DisplayName("REQ-PF-030 reject reasons are exactly the six documented ones (a mismatch is poison, not a reason)")
+    @DisplayName("REQ-PF-030 reject reasons are exactly the seven documented ones (OWNER_MISMATCH since PF-07)")
     void rejectReasons() {
         assertThat(Arrays.stream(RejectReason.values()).map(Enum::name))
                 .containsExactlyInAnyOrder(
@@ -38,7 +38,8 @@ class DomainVocabularyTest {
                         "INSUFFICIENT_FUNDS",
                         "PAYEE_UNKNOWN",
                         "PAYEE_NOT_ACTIVE",
-                        "NO_ACTIVE_HOLD");
+                        "NO_ACTIVE_HOLD",
+                        "OWNER_MISMATCH");
     }
 
     @ParameterizedTest

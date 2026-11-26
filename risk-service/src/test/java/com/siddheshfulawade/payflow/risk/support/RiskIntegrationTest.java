@@ -58,6 +58,9 @@ public abstract class RiskIntegrationTest {
         registry.add("spring.kafka.consumer.auto-offset-reset", () -> "earliest");
         registry.add("spring.flyway.locations", () -> "classpath:db/messaging,classpath:db/migration");
         registry.add("payflow.messaging.relay.enabled", () -> "false");
+        // the resource server trusts the keys of TestIssuer (no Keycloak needed)
+        registry.add("spring.security.oauth2.resourceserver.jwt.issuer-uri", () -> TestIssuer.ISSUER);
+        registry.add("spring.security.oauth2.resourceserver.jwt.jwk-set-uri", TestIssuer::jwksUri);
         // a cluster of one: this test JVM's member must not join anything else on the machine
         registry.add("payflow.risk.hazelcast.cluster-name", () -> "risk-it-" + UUID.randomUUID());
         registry.add("payflow.risk.hazelcast.port", () -> String.valueOf(HAZELCAST_PORT));

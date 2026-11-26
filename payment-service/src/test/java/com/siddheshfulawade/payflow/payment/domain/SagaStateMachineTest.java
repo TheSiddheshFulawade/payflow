@@ -137,7 +137,7 @@ class SagaStateMachineTest {
         Transition start = SagaStateMachine.start(payment);
 
         assertThat(start.to()).isEqualTo(PaymentState.RESERVING);
-        assertThat(start.command()).contains(new ReserveFunds(payment.id(), "alice", 2_500, "INR"));
+        assertThat(start.command()).contains(new ReserveFunds(payment.id(), "alice", 2_500, "INR", "local"));
     }
 
     @Test

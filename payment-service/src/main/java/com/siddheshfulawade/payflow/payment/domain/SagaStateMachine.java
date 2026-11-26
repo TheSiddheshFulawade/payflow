@@ -125,7 +125,7 @@ public final class SagaStateMachine {
     }
 
     private static ReserveFunds reserveFunds(Payment p) {
-        return new ReserveFunds(p.id(), p.payer(), p.amount(), p.currency());
+        return new ReserveFunds(p.id(), p.payer(), p.amount(), p.currency(), p.clientId());
     }
 
     private static CheckRisk checkRisk(Payment p) {

@@ -16,7 +16,7 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-/** Creating and reading payments. PF-07 adds the roles and the owner check. */
+/** Creating and reading payments. The roles are checked in the security filter chain (SecurityConfig). */
 @RestController
 @RequestMapping(PaymentController.PATH)
 class PaymentController {
@@ -49,8 +49,16 @@ class PaymentController {
                 .body(view);
     }
 
+    /**
+     * Invariant (REQ-PF-003): a client reads only its own payments. Someone else's payment is the same 404 as an
+     * unknown id, so the response does not tell whether the id exists.
+     */
     @GetMapping("/{id}")
     PaymentView read(@PathVariable UUID id) {
-        return payments.find(id).map(PaymentView::of).orElseThrow(() -> new PaymentNotFoundException(id));
+        String client = identity.clientId();
+        return payments.find(id)
+                .filter(payment -> payment.clientId().equals(client))
+                .map(PaymentView::of)
+                .orElseThrow(() -> new PaymentNotFoundException(id));
     }
 }
