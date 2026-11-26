@@ -17,11 +17,11 @@ import com.siddheshfulawade.payflow.risk.app.VelocityCounter;
 import com.siddheshfulawade.payflow.risk.app.VelocityUnavailableException;
 import com.siddheshfulawade.payflow.risk.domain.RiskLimits;
 import com.siddheshfulawade.payflow.risk.domain.VelocityWindow;
+import com.siddheshfulawade.payflow.risk.support.Ports;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetSocketAddress;
-import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketException;
 import java.net.SocketTimeoutException;
@@ -63,7 +63,7 @@ class HazelcastVelocityClusterTest {
     private VelocityCounter onB;
 
     @BeforeEach
-    void startTwoMembers() throws IOException {
+    void startTwoMembers() {
         ports = freePorts();
         String cluster = "risk-test-" + UUID.randomUUID();
         List<String> members = List.of("127.0.0.1:" + ports[0], "127.0.0.1:" + ports[1]);
@@ -101,11 +101,8 @@ class HazelcastVelocityClusterTest {
         return member.getCluster().getMembers().size();
     }
 
-    static int[] freePorts() throws IOException {
-        try (ServerSocket first = new ServerSocket(0);
-                ServerSocket second = new ServerSocket(0)) {
-            return new int[] {first.getLocalPort(), second.getLocalPort()};
-        }
+    static int[] freePorts() {
+        return new int[] {Ports.free(), Ports.free()};
     }
 
     private static String payer() {

@@ -63,7 +63,8 @@ abstract class MessagingIntegrationTest {
 
     @BeforeEach
     void cleanState() {
-        jdbc.execute("truncate table outbox, inbox, effect");
+        // TRUNCATE locks in the listed order: the order the consumer locks (inbox, effect, outbox)
+        jdbc.execute("truncate table inbox, effect, outbox");
         hook.reset();
         effect.reset();
     }

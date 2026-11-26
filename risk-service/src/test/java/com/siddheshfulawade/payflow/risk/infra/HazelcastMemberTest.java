@@ -22,7 +22,6 @@ import com.hazelcast.partition.ReplicaMigrationEvent;
 import com.siddheshfulawade.payflow.risk.app.VelocityCounter;
 import com.siddheshfulawade.payflow.risk.app.VelocityUnavailableException;
 import com.siddheshfulawade.payflow.risk.domain.RiskLimits;
-import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -54,7 +53,7 @@ class HazelcastMemberTest {
     private int[] ports;
 
     @BeforeEach
-    void newCluster() throws IOException {
+    void newCluster() {
         cluster = "risk-start-" + UUID.randomUUID();
         ports = freePorts();
     }

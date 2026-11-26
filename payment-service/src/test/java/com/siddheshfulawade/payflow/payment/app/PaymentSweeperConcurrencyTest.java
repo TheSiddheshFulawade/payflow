@@ -45,7 +45,7 @@ class PaymentSweeperConcurrencyTest extends PaymentIntegrationTest {
     @DisplayName("REQ-PF-014 three sweepers at once re-send every overdue payment exactly once (SKIP LOCKED)")
     void everyPaymentIsResentOnce() throws Exception {
         for (int round = 0; round < 3; round++) {
-            jdbc.execute("truncate table outbox, inbox, payment_event, payment");
+            jdbc.execute(CLEANUP);
             clock.set(T0);
             List<UUID> ids = new ArrayList<>();
             for (int i = 0; i < 30; i++) {
