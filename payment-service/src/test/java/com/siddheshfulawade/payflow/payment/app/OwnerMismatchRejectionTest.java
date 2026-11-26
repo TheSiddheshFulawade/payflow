@@ -49,7 +49,12 @@ class OwnerMismatchRejectionTest extends PaymentIntegrationTest {
         deliver(rejection);
         deliver(resent(rejection));
 
-        assertThat(snapshotAll()).isEqualTo(before);
+        // the re-sent reply has a new message id, so the inbox records it (one row); nothing else moves
+        Snapshot after = snapshotAll();
+        assertThat(after.payments()).isEqualTo(before.payments());
+        assertThat(after.events()).as("events").isEqualTo(before.events());
+        assertThat(after.outbox()).as("outbox").isEqualTo(before.outbox());
+        assertThat(after.inbox()).as("inbox: only the re-sent reply's new id").isEqualTo(before.inbox() + 1);
         assertThat(state(p.id())).isEqualTo("REJECTED");
     }
 
@@ -62,7 +67,12 @@ class OwnerMismatchRejectionTest extends PaymentIntegrationTest {
 
         deliver(reply(new FundsRejected(p.id(), "OWNER_MISMATCH")));
 
+        // an ignored reply is still recorded in the inbox (so its redelivery is a no-op too); nothing else moves
+        Snapshot after = snapshotAll();
         assertThat(state(p.id())).isEqualTo("RISK_CHECKING");
-        assertThat(snapshotAll()).isEqualTo(before);
+        assertThat(after.payments()).isEqualTo(before.payments());
+        assertThat(after.events()).as("events").isEqualTo(before.events());
+        assertThat(after.outbox()).as("outbox").isEqualTo(before.outbox());
+        assertThat(after.inbox()).as("inbox").isEqualTo(before.inbox() + 1);
     }
 }
