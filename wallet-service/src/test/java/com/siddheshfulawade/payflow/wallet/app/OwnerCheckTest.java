@@ -102,7 +102,11 @@ class OwnerCheckTest extends WalletIntegrationTest {
         assertOwnerMismatch(first, 1);
         assertThat(again).isEqualTo(first);
         assertThat(holdRows(payment)).isEqualTo(1);
-        assertThat(outboxReplies(payment)).hasSize(1);
+        assertThat(outboxReplies(payment))
+                .as("the stored reply is queued again with the same message id (as ReserveFundsTest)")
+                .hasSize(2)
+                .satisfies(replies -> assertThat(replies.get(0).messageId())
+                        .isEqualTo(replies.get(1).messageId()));
         assertBalances("alice", 1_000, 0);
     }
 

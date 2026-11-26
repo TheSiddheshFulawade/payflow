@@ -119,7 +119,7 @@ class WalletAdminApiTest extends WalletIntegrationTest {
 
         asOps(get("/api/v1/wallets/alice")).andExpect(jsonPath("$.status").value("FROZEN"));
         UUID payment = UUID.randomUUID();
-        var reply = apply(reserve(payment, "alice", 100));
+        var reply = apply(reserveAs("sub-alice", payment, "alice", 100, 1));
 
         assertThat(reply.payload()).isEqualTo(new FundsRejected(payment, "WALLET_FROZEN"));
         assertBalances("alice", 1_000, 0);
@@ -129,7 +129,7 @@ class WalletAdminApiTest extends WalletIntegrationTest {
     @DisplayName("REQ-PF-030 reads show the held amount after a reserve")
     void readShowsHold() throws Exception {
         seed("alice", 1_000);
-        apply(reserve(UUID.randomUUID(), "alice", 400));
+        apply(reserveAs("sub-alice", UUID.randomUUID(), "alice", 400, 1));
 
         asOps(get("/api/v1/wallets/alice"))
                 .andExpect(jsonPath("$.available").value(600))
