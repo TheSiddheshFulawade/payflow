@@ -3,15 +3,18 @@ package com.siddheshfulawade.payflow.risk.infra;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.hazelcast.config.ClassFilter;
 import com.hazelcast.config.JavaSerializationFilterConfig;
-import com.hazelcast.core.OperationTimeoutException;
+import com.hazelcast.core.HazelcastException;
 import com.hazelcast.internal.serialization.InternalSerializationService;
 import com.hazelcast.internal.serialization.impl.DefaultSerializationServiceBuilder;
-import com.hazelcast.spi.exception.RetryableIOException;
 import com.siddheshfulawade.payflow.risk.domain.RiskLimits;
 import java.io.Serializable;
+import java.lang.reflect.Modifier;
 import java.util.List;
+import java.util.TreeSet;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.jar.JarFile;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -71,7 +74,8 @@ class HazelcastSerializationFilterTest {
         assertThat(filter.isDefaultsDisabled()).as("defaults disabled").isTrue();
         assertThat(filter.getWhitelist().getPrefixes()).as("prefixes").isEmpty();
         assertThat(filter.getWhitelist().getPackages()).as("packages").isEmpty();
-        assertThat(filter.getWhitelist().getClasses()).containsExactlyInAnyOrderElementsOf(ALLOWED);
+        // the velocity classes, their fields and the base errors; Hazelcast's own errors are pinned by the scan below
+        assertThat(filter.getWhitelist().getClasses()).containsAll(ALLOWED);
         assertThat(filter.getBlacklist().isEmpty())
                 .as("nothing needs a blacklist")
                 .isTrue();
@@ -82,10 +86,6 @@ class HazelcastSerializationFilterTest {
     static Stream<Arguments> refused() {
         return Stream.of(
                 Arguments.of("a JDK type Hazelcast sends by Java serialization", new AtomicLong(7)),
-                Arguments.of("a Hazelcast exception that is not on the list", new OperationTimeoutException("slow")),
-                Arguments.of(
-                        "a Hazelcast exception whose base class (IOException) is not on the list",
-                        new RetryableIOException("io")),
                 Arguments.of("a Spring class", new org.springframework.util.LinkedMultiValueMap<String, String>()),
                 Arguments.of(
                         "a PayFlow Serializable class that is not VelocityWindow or the processor",
@@ -108,6 +108,83 @@ class HazelcastSerializationFilterTest {
         } finally {
             serialization.dispose();
         }
+    }
+
+    // ---- Hazelcast's own errors, found by scanning the jar, not hand-picked ----
+
+    /** Every concrete Hazelcast Throwable that is sent as a Java object, with its base classes up to Throwable. */
+    private static List<String> hazelcastThrowablesAndBases() throws Exception {
+        var found = new TreeSet<String>();
+        var jar = java.nio.file.Path.of(HazelcastException.class
+                .getProtectionDomain()
+                .getCodeSource()
+                .getLocation()
+                .toURI());
+        try (var jarFile = new JarFile(jar.toFile())) {
+            for (var entry : jarFile.stream().toList()) {
+                String name = entry.getName();
+                // shaded/ holds bundled third-party libraries (Jackson, snakeyaml...), not Hazelcast's own errors
+                if (!name.startsWith("com/hazelcast/")
+                        || name.startsWith("com/hazelcast/shaded/")
+                        || !name.endsWith(".class")) {
+                    continue;
+                }
+                String className =
+                        name.substring(0, name.length() - ".class".length()).replace('/', '.');
+                Class<?> type;
+                try {
+                    type = Class.forName(className, false, HazelcastException.class.getClassLoader());
+                } catch (ClassNotFoundException | LinkageError optionalDependencyMissing) {
+                    continue;
+                }
+                boolean concrete = !type.isInterface() && !Modifier.isAbstract(type.getModifiers());
+                // Hazelcast's own serializers take DataSerializable before Java serialization
+                boolean javaSerialized = !com.hazelcast.nio.serialization.DataSerializable.class.isAssignableFrom(type);
+                if (Throwable.class.isAssignableFrom(type) && concrete && javaSerialized) {
+                    for (Class<?> c = type; c != null && c != Object.class; c = c.getSuperclass()) {
+                        found.add(c.getName());
+                    }
+                }
+            }
+        }
+        return List.copyOf(found);
+    }
+
+    @Test
+    @DisplayName("REQ-PF-032 the scan finds Hazelcast's errors, among them the one that stopped a member join")
+    void scanFindsThePartitionStateVersionMismatch() throws Exception {
+        assertThat(hazelcastThrowablesAndBases())
+                .contains("com.hazelcast.internal.partition.PartitionStateVersionMismatchException")
+                .hasSizeGreaterThan(20);
+    }
+
+    @Test
+    @DisplayName("REQ-PF-032 every Hazelcast error a member can send, and its base classes, is readable by the filter")
+    void everyHazelcastErrorIsAllowed() throws Exception {
+        ClassFilter allowed = filter().getWhitelist();
+
+        var refused = hazelcastThrowablesAndBases().stream()
+                .filter(name -> !allowed.isListed(name))
+                .toList();
+
+        assertThat(refused).as("Hazelcast errors the filter refuses").isEmpty();
+    }
+
+    @Test
+    @DisplayName("REQ-PF-032 only Hazelcast errors are opened: other Hazelcast classes and look-alikes stay refused")
+    void nothingButHazelcastErrorsIsOpened() throws Exception {
+        ClassFilter allowed = filter().getWhitelist();
+        // sanity: the filter is the one under test, and it still lets the explicit entries through
+        assertThat(allowed.isListed("com.hazelcast.core.HazelcastException")).isTrue();
+
+        assertThat(allowed.isListed("java.util.HashMap")).isFalse();
+        assertThat(allowed.isListed("javax.management.BadAttributeValueExpException"))
+                .isFalse();
+        assertThat(allowed.isListed("com.hazelcastx.core.HazelcastException")).isFalse();
+        assertThat(allowed.isListed("com.hazelcast.config.Config")).isFalse();
+        assertThat(allowed.isListed("com.hazelcast.map.IMap")).isFalse();
+        assertThat(allowed.isListed("com.hazelcast.internal.partition.PartitionReplica"))
+                .isFalse();
     }
 
     private static InternalSerializationService serialization() {
