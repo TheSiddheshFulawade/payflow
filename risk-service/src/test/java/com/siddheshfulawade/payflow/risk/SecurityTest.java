@@ -188,4 +188,30 @@ class SecurityTest extends SecuredWebTest {
         mvc.perform(get("/api/v1/risk").header("Authorization", "Bearer " + TestIssuer.withoutExpiry("user-1", "ops")))
                 .andExpect(unauthorizedProblem());
     }
+
+    @ParameterizedTest
+    @ValueSource(
+            strings = {"/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/api/v1/payments"
+            })
+    @DisplayName("REQ-PF-003 the OAuth protected-resource metadata path is refused without a token like any other")
+    void protectedResourceMetadataIsClosed(String path) throws Exception {
+        mvc.perform(get(path)).andExpect(unauthorizedProblem());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"a\u0085b", "a\u2028b", "a\u202Eb", "a\u200Bb", "\u00e9", "a b", "a\nb"})
+    @DisplayName("REQ-PF-003 a token whose subject breaks the subject rule (printable ASCII only) is a 401 problem")
+    void badSubjectIsRefused(String subject) throws Exception {
+        mvc.perform(get("/api/v1/risk").header("Authorization", "Bearer " + TestIssuer.valid(subject, "ops")))
+                .andExpect(unauthorizedProblem());
+    }
+
+    @Test
+    @DisplayName("REQ-PF-003 a subject of 64 printable ASCII characters passes the token check and 65 is a 401")
+    void subjectLengthBoundary() throws Exception {
+        mvc.perform(get("/api/v1/risk").header("Authorization", "Bearer " + TestIssuer.valid("x".repeat(64), "ops")))
+                .andExpect(status().isForbidden());
+        mvc.perform(get("/api/v1/risk").header("Authorization", "Bearer " + TestIssuer.valid("x".repeat(65), "ops")))
+                .andExpect(unauthorizedProblem());
+    }
 }

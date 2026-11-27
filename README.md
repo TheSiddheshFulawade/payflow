@@ -201,7 +201,8 @@ Filled in task by task: what was chosen, the alternative, and why.
 - **Security in all three services (PF-07): audience checked by a custom `OAuth2TokenValidator`; deny by default;
   roles from `realm_access.roles` without `ROLE_`**. Alternative: the `audiences` property of Boot - when empty it
   checks nothing, so a config slip turns the check off without a sound; our validator also refuses a token without
-  `exp` (the standard check skips it) and a subject outside the one rule. Alternative to the final `denyAll()`: rules
+  `exp` (the standard check skips it) and a subject outside the one rule, in all three services. Spring Security 7's
+  protected-resource metadata filter cannot be switched off, so each chain removes it; that path is 401 like any other. Alternative to the final `denyAll()`: rules
   for the known paths only - HEAD on a payment slipped past GET-only rules; now whatever no rule names is 401 or 403.
   The 401, 403 and firewall 400 bodies are fixed problem details, and `WWW-Authenticate` has no `error_description`
   (it would name the issuer or audience to someone probing). The issuer has no default: a missing `PAYFLOW_ISSUER_URI`
@@ -215,15 +216,18 @@ Filled in task by task: what was chosen, the alternative, and why.
   (no existence leak).
 - **`ReserveFunds` gained a required field while the message version stays 1**. Alternative: version 2 now - nothing
   is released (the repo is public, v1.0.0 is not out), so there are no old readers. Cost: a `ReserveFunds` already in
-  Kafka without `requester` is poison (dead-letter), and the sweeper re-sends a rebuilt command after the deadline.
+  Kafka without `requester` is poison (dead-letter); after the deadline the sweeper re-sends a command rebuilt from the
+  payment row, now with `requester`, up to 3 times, then releases (the payment ends `REVERSED`, nothing held).
   Deploy wallet-service first. After v1.0.0 a new required field means version 2 and a window where both are read.
 - **Every Hazelcast error is in the deserialization allow-list, as exact class names generated from a jar scan**
-  (`hazelcast-allowed-errors.txt`, 124 names: 112 Hazelcast errors and their base classes). Alternative: hand-pick
-  the errors a velocity check expects - that missed `PartitionStateVersionMismatchException`, so in CI run 45877124629
-  a join migration's error reply could not be read, the migration was never answered and the cluster stayed unsafe
-  for 30 s (likely also the "inferred lost ack" above). Alternative: allow the `com.hazelcast.` prefix - that opens
-  every Serializable class in the jar to a crafted stream. The scan test fails on a Hazelcast upgrade until the file is
-  regenerated, and a missing or empty file stops the member. Not allowed: arbitrary JDK causes and suppressed lists.
+  (`hazelcast-allowed-errors.txt`, 124 names: 112 Hazelcast errors and 12 JDK and other base classes up to `Throwable`).
+  Alternative: hand-pick the errors a velocity check expects - that missed `PartitionStateVersionMismatchException`, so
+  in CI run 45877124629 a join migration's error reply could not be read, the migration was never answered and the
+  cluster stayed unsafe for 30 s (likely also the "inferred lost ack" above). Alternative: allow the `com.hazelcast.`
+  prefix - that opens every Serializable class in the jar to a crafted stream. The scan test fails on a Hazelcast
+  upgrade until the file is regenerated, and a missing or empty file stops the member. Not allowed: arbitrary JDK causes
+  and suppressed lists (a `ConnectException` cause is refused, tested). `MemberLeftException.readObject` resolves the
+  host the sender wrote, so a crafted stream can force a DNS lookup; accepted, the member port is trust-the-network.
 - **Containers (PF-08): layered Boot jar built on the host, exact-tag JRE base, numeric non-root user, heap as a
   percentage of the container limit; one Hazelcast network that is `internal`**. Alternative: Maven or buildpacks
   inside Docker - slower, and a second way to build the jar. Alternative: a floating `21-jre` tag - the image would

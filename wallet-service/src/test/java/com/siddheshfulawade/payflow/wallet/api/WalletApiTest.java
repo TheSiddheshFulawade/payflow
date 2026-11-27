@@ -185,9 +185,9 @@ class WalletApiTest {
     }
 
     @Test
-    @DisplayName("REQ-PF-004 a wrong method on the seed URL gets 405 problem+json")
+    @DisplayName("REQ-PF-004 a wrong method on the seed URL is refused by security first: 403 problem+json, not 405")
     void wrongMethodIsProblem() throws Exception {
-        mvc.perform(get(OPS)).andExpect(problem(405));
+        mvc.perform(get(OPS)).andExpect(problem(403));
     }
 
     // ---- PUT /api/v1/ops/wallets/{id}/status ----

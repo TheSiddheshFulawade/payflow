@@ -257,4 +257,13 @@ class PaymentSecurityTest extends SecuredWebTest {
     private static String typeAndTitle(String problemJson) {
         return JsonPath.<String>read(problemJson, "$.type") + "|" + JsonPath.<String>read(problemJson, "$.title");
     }
+
+    @ParameterizedTest
+    @ValueSource(
+            strings = {"/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/api/v1/payments"
+            })
+    @DisplayName("REQ-PF-003 the OAuth protected-resource metadata path is refused without a token like any other")
+    void protectedResourceMetadataIsClosed(String path) throws Exception {
+        mvc.perform(get(path)).andExpect(problem(401));
+    }
 }

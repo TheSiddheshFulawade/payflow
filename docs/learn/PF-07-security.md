@@ -1,7 +1,8 @@
 # PF-07 Security: who may call, and whose money it is
 
-Status: this note describes the uncommitted PF-07 work on branch `feat/pf-07-security`. I read the code and its tests;
-I did not run Maven. Payment-service paths are shortened to `payment-service/.../api/` (full package
+Status: PF-07 work on branch `feat/pf-07-security`, with the security follow-up (metadata path closed, one subject rule
+in all three services, one method per wallet ops route). Maven `verify` was run per module offline; see the session
+handoff for the counts. Payment-service paths are shortened to `payment-service/.../api/` (full package
 `com/siddheshfulawade/payflow/payment/api`); the same for wallet and risk. Line numbers are from the working tree and
 may move when the code is edited.
 
@@ -11,14 +12,17 @@ Before PF-07 anyone could call the APIs. Now all three services (payment, wallet
 request, and two services also check whose money is involved.
 
 1. **Every request needs a valid token.** Only `GET /actuator/health` is open
-   (`payment-service/.../api/SecurityConfig.java:38`). The token is a JWT issued by Keycloak.
+   (`payment-service/.../api/SecurityConfig.java:41`). The token is a JWT issued by Keycloak.
 2. **The token must pass these checks**: a valid signature, the right issuer, not expired, and the audience
-   `payflow-api` (`TokenRules.java:98-110`). The first two come from Spring Boot; the rest we added ourselves.
+   `payflow-api` (`TokenRules.java:30-38`). Boot checks the signature, the issuer and, when the token has an `exp`, that it has not
+   expired; "`exp` must be present", the audience and the subject rule are ours.
 3. **The role decides the action.** `payments:write` creates a payment, `payments:read` reads one
-   (`SecurityConfig.java:40-43`); `ops` seeds and freezes wallets (wallet-service `SecurityConfig.java`).
-4. **Everything else is refused**: `anyRequest().denyAll()` (`SecurityConfig.java:44-46`).
+   (`SecurityConfig.java:42-45`); `ops` seeds and freezes wallets (wallet-service `SecurityConfig.java`).
+4. **Everything else is refused**: `anyRequest().denyAll()` (`SecurityConfig.java:46-48`).
 5. **The caller is the token's `sub`**, never a header or body field (`JwtClientIdentity.java`, `clientId()`).
-6. **You see only your own things.** Someone else's payment gives the same 404 as an unknown id
+6. **You see only your own things.** A client reads only the payments it created (`sub` = `client_id`), which is
+   narrower than SPEC's "payer" rule: payment-service does not know wallet owners, and the wallet's owner check makes
+   creator = payer owner for every payment that held money. Someone else's payment gives the same 404 as an unknown id
    (`PaymentController.java`, `read`, the `filter` on `clientId`). Same for a wallet (`WalletController.java`, `read`
    and `mayRead`; `ops` may read any).
 7. **The wallet checks that the payer wallet belongs to the requester** before it holds any money
@@ -40,20 +44,26 @@ lazily on the first token, so the service and its health check start even when K
 - **Signature** against the JWKS: proves Keycloak made it and nobody edited it.
 - **Issuer**: the token says who issued it; it must be our realm.
 - **Expiry (`exp`) required**: the standard Spring check *skips* a token that has no `exp`, so such a token would
-  live forever. `TokenRules.java:100` refuses it.
-- **Audience `payflow-api`** (`TokenRules.java:103`): the token must be meant for our API. We use a custom validator
-  bean (`SecurityConfig.java:66-69`; Boot adds every `OAuth2TokenValidator<Jwt>` bean to its decoder) instead of the
+  live forever. `TokenRules.java:30` refuses it.
+- **Audience `payflow-api`** (`TokenRules.java:33`): the token must be meant for our API. We use a custom validator
+  bean (`SecurityConfig.java:74-77`; Boot adds every `OAuth2TokenValidator<Jwt>` bean to its decoder) instead of the
   `audiences` property, because that property does nothing when it is empty, so a config slip would quietly turn the
   check off. The audience is shared by the three services, so it keeps *foreign* tokens out; it does not separate
   payment from wallet (roles do that). That is a known limit.
-- **Subject** (`TokenRules.java:106`): see "One subject rule" below.
+- **Subject** (`TokenRules.java:36`, in all three services): see "One subject rule" below.
 
 ### Roles from `realm_access.roles`, no `ROLE_` prefix
-Keycloak puts realm roles in `realm_access.roles`. `RealmRoles.java:136-143` turns each string there into an authority
+Keycloak puts realm roles in `realm_access.roles`. `RealmRoles.java:19-27` turns each string there into an authority
 with exactly that name (`payments:write`). Spring's default would read `scope` and add prefixes, and then
 `hasAuthority("payments:write")` would never match. A token with no `realm_access`, a malformed one, or a non-string
 entry gets no authority from it: 403, never a 500. Roles in a top-level claim or in `scope` grant nothing
 (`JwtValidationTest.java:101`).
+
+### The metadata path is closed
+Spring Security 7 adds `OAuth2ProtectedResourceMetadataFilter` to every resource server, before authorization, and the
+configurer has no switch to turn it off. Left alone it would answer `/.well-known/oauth-protected-resource` to anyone.
+Each `SecurityConfig` removes it from the built chain, so that path is just another unknown path: 401 without a token.
+It is the same in the three services.
 
 ### Deny by default
 `anyRequest().denyAll()` is the last rule. Why: an earlier draft had rules only for `GET` on the payment path. A `HEAD`
@@ -68,7 +78,7 @@ refusal, so a new endpoint is closed until someone opens it.
 
 Both are RFC 9457 problem details (`application/problem+json`) with a fixed `type` and `title`
 (`SecurityProblems.java`, `write`). The `WWW-Authenticate` header is exactly `Bearer` (no token) or
-`Bearer error="invalid_token"` (bad token) (`SecurityProblems.java:186`). It deliberately has **no
+`Bearer error="invalid_token"` (bad token) (`SecurityProblems.java:41`). It deliberately has **no
 `error_description`**: that text would say things like "wrong issuer" or name the audience, which helps someone
 probing the setup. The detail is logged at DEBUG only. These bodies are written by hand because the security filter
 runs *before* Spring MVC, so our normal `@RestControllerAdvice` never sees these errors.
@@ -76,8 +86,8 @@ runs *before* Spring MVC, so our normal `@RestControllerAdvice` never sees these
 ### Firewall `RequestRejectedException` becomes 400
 Spring Security's firewall refuses odd requests (a NUL byte in a header, a path with `;` or encoded dots) by throwing
 `RequestRejectedException`. The default is an empty 400 or a 500. The same `SecurityProblems` bean implements
-`RequestRejectedHandler` (`SecurityProblems.java:199-202`) and gives a 400 problem. The comment at
-`SecurityConfig.java:56-59` names the trap: a second bean of that type makes Spring's lookup ambiguous and silently
+`RequestRejectedHandler` (`SecurityProblems.java:54`) and gives a 400 problem. The comment at
+`SecurityConfig.java:63-67` names the trap: a second bean of that type makes Spring's lookup ambiguous and silently
 brings back the default. The advice classes also handle the exception, for the case where the header is first read
 inside the controller call (`ApiProblems.java`, `rejectedByFirewall`).
 
@@ -96,7 +106,7 @@ Hiding things at the API is not enough: the payer is a field in the request body
 Alice's wallet as payer. Money is held by wallet-service, which knows who owns each wallet (`owner_sub`). So:
 - payment-service puts the creator's `sub` in the command as `requester`;
 - wallet-service compares it with the wallet's owner (`WalletCommandHandler.java`, the `OWNER_MISMATCH` branch) and
-  replies `Rejected(OWNER_MISMATCH)`; the payment ends `REJECTED`.
+  replies `FundsRejected(OWNER_MISMATCH)`; the payment ends `REJECTED`.
 
 Details that matter, each with a test in `wallet-service/.../app/OwnerCheckTest.java`:
 - **Order**: after `WALLET_UNKNOWN` (no row, so no owner to compare), but **before** frozen and funds. A stranger must
@@ -113,7 +123,7 @@ couple them and could race with changes.
 
 ### One subject rule
 `Subjects.isValid` (`contracts/.../Subjects.java`): 1 to 64 printable ASCII characters (`[\x21-\x7E]`). It is used by
-the token validator, the `ReserveFunds` constructor (`Checks.subject`) and the wallet's `ownerSub` request field
+the token validator of all three services (`TokenRules`), the `ReserveFunds` constructor (`Checks.subject`) and the wallet's `ownerSub` request field
 (`CreateWalletRequest.java`). One class, so the places cannot drift apart. Keycloak subjects are 36-character UUIDs;
 the rule keeps control characters, line breaks, spaces and invisible characters out of logs and messages (log
 forging) and out of a field we compare for ownership. It replaced a looser 255-character rule in the wallet.
@@ -132,7 +142,8 @@ Without fixed ids, a Keycloak reset would give Alice a new `sub` and her seeded 
 released yet. Consequences:
 - A `ReserveFunds` already in Kafka without `requester` is **poison** for the new wallet: decoding fails
   (`ReserveFundsRequesterTest.java:47`), it goes to the dead-letter topic (PF-02) and is never an unchecked reserve.
-  The payment's deadline then fires and the sweeper (PF-06) sends a rebuilt command, now with the requester.
+  The payment's deadline then fires and the sweeper (PF-06) re-sends a command rebuilt from the payment row, now with
+  the requester, up to 3 times; after that it releases, and the payment ends `REVERSED` with nothing held.
 - **Deploy wallet-service first**, so that no new command meets an old wallet that has no check.
 - After v1.0.0 a new required field means version 2, and a window where consumers read both versions.
 
@@ -148,7 +159,7 @@ Bob          PaymentController   Payment saga     Outbox -> Kafka     WalletComm
  |                                                                     | lock wallet row -------->|
  |                                                                     | owner_sub = alice != bob |
  |                                                                     | store REJECTED hold + reply (one tx)
- |                            |<------------- Rejected(OWNER_MISMATCH) -|                         |
+ |                            |<-------- FundsRejected(OWNER_MISMATCH) -|                         |
  |                            | RESERVING -> REJECTED (nothing was held, nothing to release)
  | GET /payments/{id} as bob   -> status REJECTED
  | GET /payments/{id} as carol -> 404, same body as an unknown id
@@ -183,8 +194,8 @@ in `ReserveFunds` under the row lock, replies `OWNER_MISMATCH` before it looks a
 
 **5. You added a required field to a Kafka message and kept version 1. Defend or attack that.**
 Defend: nothing is released, so there are no old readers to protect, and a message without the field is poison
-(dead-letter), never an unchecked reserve, which is the safe failure. The sweeper re-sends a rebuilt command after the
-deadline. Deploy the consumer (wallet) first. Attack: in production this breaks in-flight messages, so after v1.0.0 a
+(dead-letter), never an unchecked reserve, which is the safe failure. After the deadline the sweeper re-sends a command
+rebuilt from the payment row (with the requester) up to 3 times, then releases: the payment ends REVERSED. Deploy the consumer (wallet) first. Attack: in production this breaks in-flight messages, so after v1.0.0 a
 new required field must be version 2, with consumers reading both versions during the roll-out; an optional field with
 a safe default would not need that.
 

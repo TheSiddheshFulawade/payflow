@@ -37,4 +37,26 @@ class HazelcastAllowedErrorsFileTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("is empty");
     }
+
+    @Test
+    @DisplayName("REQ-PF-032 independent of the scan: every listed name is a Throwable, and no Hazelcast entry is"
+            + " DataSerializable (a loosened scan can't slip other classes in)")
+    void everyEntryIsAThrowableAndNoHazelcastEntryIsDataSerializable() {
+        var names = HazelcastConfigFactory.allowedErrors(HazelcastConfigFactory.ALLOWED_ERRORS);
+
+        assertThat(names).allSatisfy(name -> {
+            Class<?> type;
+            try {
+                type = Class.forName(name, false, HazelcastAllowedErrorsFileTest.class.getClassLoader());
+            } catch (ClassNotFoundException e) {
+                throw new AssertionError(name + " is not on the classpath", e);
+            }
+            assertThat(Throwable.class).as(name).isAssignableFrom(type);
+            if (name.startsWith("com.hazelcast.")) {
+                assertThat(com.hazelcast.nio.serialization.DataSerializable.class.isAssignableFrom(type))
+                        .as("%s is DataSerializable, never read by Java serialization", name)
+                        .isFalse();
+            }
+        });
+    }
 }

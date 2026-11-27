@@ -120,8 +120,9 @@ final class HazelcastConfigFactory {
                 .addClasses(allowedErrors(ALLOWED_ERRORS).toArray(String[]::new))
                 // what those errors write besides strings and other errors: Throwable's stack trace and its empty
                 // suppressed list, and the member version that MemberLeftException writes (its address and UUID go as
-                // plain strings and longs). Its readObject rebuilds the Address from the host string, which resolves
-                // it: members are configured by IP, so no DNS lookup; a host name would cost one lookup per error read.
+                // plain strings and longs). Its readObject resolves whatever host the SENDER wrote (new Address ->
+                // InetAddress.getByName): an honest member writes its bind IP (no lookup), but a crafted stream can
+                // force one DNS lookup per error read. Accepted: the member port is already trust-the-network.
                 .addClasses(
                         "java.lang.StackTraceElement",
                         "[Ljava.lang.StackTraceElement;",
