@@ -3,7 +3,7 @@
 **Crash-safe payment orchestration.** Kill any service, or the Kafka broker, in the middle of a payment: every
 payment still ends `COMPLETED`, `REVERSED` or `REJECTED`, with no money lost and nothing charged twice.
 
-> Status: in development (v1 due 30 November 2026). The spec is in [SPEC.md](SPEC.md); the decisions are in [docs/adr](docs/adr).
+> Open source (MIT). Status: in development (v1 due 30 November 2026). The spec is in [SPEC.md](SPEC.md); the decisions are in [docs/adr](docs/adr).
 
 ## What it is
 
@@ -226,3 +226,7 @@ Filled in task by task: what was chosen, the alternative, and why.
 ## Results
 
 The chaos scenarios table and the reconciliation numbers arrive with PF-09 and PF-10.
+
+## Licence
+
+Open source under the [MIT licence](LICENSE). Copyright (c) 2026 Siddhesh Fulawade.
