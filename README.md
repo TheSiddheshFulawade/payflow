@@ -233,10 +233,10 @@ Filled in task by task: what was chosen, the alternative, and why.
   inside Docker - slower, and a second way to build the jar. Alternative: a floating `21-jre` tag - the image would
   change under a rebuild. Keycloak puts `http://localhost:8180/realms/payflow` in every token (`KC_HOSTNAME`), but
   `localhost` inside a container is the container itself, so the services take the issuer from `PAYFLOW_ISSUER_URI` and
-  the keys from `PAYFLOW_JWK_SET_URI` (`keycloak:8080`): the issuer claim is still checked, the keys come over the
+  the keys from `PAYFLOW_JWK_SET_URI` (`keycloak:8080`): the issuer claim is still checked (a blank issuer stops the start), the keys come over the
   private network. Every published port binds `127.0.0.1`; the Hazelcast port is never published and its network has no
   route out, so only the two risk members can reach a port that has no authentication. Memory is capped per container
-  (5.5 GB total) so the stack fits a laptop.
+  (5.5 GB total) so the stack fits a laptop. The app containers are read-only with `/tmp` as tmpfs, no capabilities and no-new-privileges, and the system test runs under its own compose project name (`payflow-systemtest`).
 
 ## Results
 

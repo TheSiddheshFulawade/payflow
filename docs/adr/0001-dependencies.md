@@ -31,7 +31,9 @@ Container images (pinned tags, checked 2026-11-23):
 | `postgres`                  | `18.7-alpine3.24`          | compose, Testcontainers (= settlement-lab)      |
 | `apache/kafka`              | `4.4.0` (KRaft)            | compose, Testcontainers                         |
 | `quay.io/keycloak/keycloak` | `26.8.2`                   | compose, the Keycloak container test (PF-07)    |
-| `eclipse-temurin`           | `25.0.5.1_2-jre-alpine-3.24` | JRE base for service images (PF-08)           |
+| `eclipse-temurin`           | `21.0.9_10-jre-noble`      | JRE base for service images (PF-08)           |
+
+Base image reason: Java 21 LTS is the language level, and the healthchecks need bash (Alpine has none). Digests are to be pinned after the first successful pull (not yet possible).
 
 CI actions (pinned by commit SHA): `actions/checkout` v7.0.1 `3d3c42e5…`, `actions/setup-java` v6.3.0 `d1374f8a…`.
 

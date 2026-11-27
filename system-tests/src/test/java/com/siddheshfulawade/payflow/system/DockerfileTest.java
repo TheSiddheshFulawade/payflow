@@ -25,6 +25,15 @@ class DockerfileTest {
     private static final Pattern PINNED_BASE =
             Pattern.compile("eclipse-temurin:21\\.\\d+(\\.\\d+)*_\\d+-jre(-[a-z0-9.]+)?");
 
+    @Test
+    @DisplayName("REQ-PF-051 docs/adr/0001-dependencies.md names the same base image tag as the Dockerfiles")
+    void adrNamesTheDockerfileBaseImageTag() throws IOException {
+        String adr = Files.readString(ROOT.resolve("docs/adr/0001-dependencies.md"));
+        String tag = baseImages("payment-service").get(0).substring("eclipse-temurin:".length());
+
+        assertThat(adr).contains("`eclipse-temurin`").contains("`" + tag + "`");
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"payment-service", "wallet-service", "risk-service"})
     @DisplayName("REQ-PF-051 every stage uses a pinned eclipse-temurin 21 JRE tag, never latest or a floating 21-jre")

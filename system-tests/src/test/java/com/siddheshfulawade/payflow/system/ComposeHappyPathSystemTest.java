@@ -36,6 +36,8 @@ import tools.jackson.databind.json.JsonMapper;
 class ComposeHappyPathSystemTest {
 
     private static final Path ROOT = repoRoot();
+    // Invariant: own project name, so `down -v` here can never remove the developer's demo stack (project "payflow").
+    private static final String PROJECT = "payflow-systemtest";
     private static final String COMPOSE = ROOT.resolve("deploy/compose.yaml").toString();
     private static final String TOKEN_URL = "http://localhost:8180/realms/payflow/protocol/openid-connect/token";
     private static final String WALLETS = "http://localhost:8082/api/v1";
@@ -53,12 +55,12 @@ class ComposeHappyPathSystemTest {
 
     @BeforeAll
     static void startStack() throws Exception {
-        run(List.of("docker", "compose", "-f", COMPOSE, "up", "-d", "--build", "--wait", "--wait-timeout", "300"), 600);
+        run(List.of("docker", "compose", "-p", PROJECT, "-f", COMPOSE, "up", "-d", "--build", "--wait"), 600);
     }
 
     @AfterAll
     static void stopStack() throws Exception {
-        run(List.of("docker", "compose", "-f", COMPOSE, "down", "-v", "--remove-orphans"), 120);
+        run(List.of("docker", "compose", "-p", PROJECT, "-f", COMPOSE, "down", "-v", "--remove-orphans"), 120);
     }
 
     @Test
@@ -167,9 +169,11 @@ class ComposeHappyPathSystemTest {
                 .redirectErrorStream(true)
                 .redirectOutput(ProcessBuilder.Redirect.INHERIT)
                 .start();
-        assertThat(process.waitFor(timeoutSeconds, TimeUnit.SECONDS))
-                .as("%s finished", command)
-                .isTrue();
+        boolean finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
+        if (!finished) {
+            process.destroyForcibly(); // a hung docker process must not outlive the test
+        }
+        assertThat(finished).as("%s finished", command).isTrue();
         assertThat(process.exitValue()).as("%s exit code", command).isZero();
     }
 

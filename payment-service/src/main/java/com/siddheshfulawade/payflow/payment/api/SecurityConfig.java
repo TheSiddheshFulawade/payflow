@@ -9,11 +9,13 @@ import org.springframework.security.config.annotation.web.configurers.AbstractHt
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.oauth2.core.OAuth2TokenValidator;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.jwt.JwtIssuerValidator;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.oauth2.server.resource.web.OAuth2ProtectedResourceMetadataFilter;
 import org.springframework.security.web.DefaultSecurityFilterChain;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.firewall.RequestRejectedHandler;
+import org.springframework.util.Assert;
 
 /**
  * The payment API is an OAuth 2.0 resource server. Only {@code GET /actuator/health} is open; everything else, even a
@@ -74,5 +76,17 @@ class SecurityConfig {
     @Bean
     OAuth2TokenValidator<Jwt> tokenRules(@Value("${payflow.security.audience:payflow-api}") String audience) {
         return new TokenRules(audience);
+    }
+
+    /**
+     * Invariant (REQ-PF-003): a token is accepted only if its {@code iss} equals the configured issuer. Boot adds its
+     * own issuer check only when the issuer has text, so a blank PAYFLOW_ISSUER_URI plus a jwk-set-uri would silently
+     * accept any issuer. Here a blank issuer stops the start, and the check is added explicitly.
+     */
+    @Bean
+    OAuth2TokenValidator<Jwt> issuerRule(
+            @Value("${spring.security.oauth2.resourceserver.jwt.issuer-uri:}") String issuer) {
+        Assert.hasText(issuer, "PAYFLOW_ISSUER_URI must be set: the issuer of accepted tokens");
+        return new JwtIssuerValidator(issuer);
     }
 }

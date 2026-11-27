@@ -203,6 +203,27 @@ class ComposeStackTest {
         assertThat(yml).contains("issuer-uri: ${PAYFLOW_ISSUER_URI}");
     }
 
+    @Test
+    @DisplayName("REQ-PF-051 every app is read_only with a /tmp tmpfs, cap_drop ALL and no-new-privileges")
+    void appsAreHardened() throws IOException {
+        Map<String, String> services = services();
+
+        for (String app : APPS) {
+            String block = services.get(app);
+            assertThat(block).as("%s read_only", app).containsPattern("(?m)^\\s+read_only:\\s*true\\s*(#.*)?$");
+            assertThat(block)
+                    .as("%s tmpfs /tmp", app)
+                    .containsPattern("tmpfs:\\s*\\n(?:\\s+-[^\\n]*\\n)*?\\s+-\\s*\"?/tmp\\b");
+            assertThat(block)
+                    .as("%s cap_drop ALL", app)
+                    .containsPattern("cap_drop:\\s*\\n(?:\\s+-[^\\n]*\\n)*?\\s+-\\s*\"?ALL\"?\\s*(#.*)?\\n");
+            assertThat(block)
+                    .as("%s no-new-privileges", app)
+                    .containsPattern(
+                            "security_opt:\\s*\\n(?:\\s+-[^\\n]*\\n)*?\\s+-\\s*\"?no-new-privileges:true\"?\\s*(#.*)?\\n");
+        }
+    }
+
     private static String portsSection(String block) {
         Matcher m =
                 Pattern.compile("(?m)^    ports:\\s*\\n((?:      +-.*\\n?)*)").matcher(block);
