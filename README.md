@@ -211,6 +211,13 @@ Filled in task by task: what was chosen, the alternative, and why.
   is released (the repo is public, v1.0.0 is not out), so there are no old readers. Cost: a `ReserveFunds` already in
   Kafka without `requester` is poison (dead-letter), and the sweeper re-sends a rebuilt command after the deadline.
   Deploy wallet-service first. After v1.0.0 a new required field means version 2 and a window where both are read.
+- **Every Hazelcast error is in the deserialization allow-list, as exact class names generated from a jar scan**
+  (`hazelcast-allowed-errors.txt`, 124 names: 112 Hazelcast errors and their base classes). Alternative: hand-pick
+  the errors a velocity check expects - that missed `PartitionStateVersionMismatchException`, so in CI run 45877124629
+  a join migration's error reply could not be read, the migration was never answered and the cluster stayed unsafe
+  for 30 s (likely also the "inferred lost ack" above). Alternative: allow the `com.hazelcast.` prefix - that opens
+  every Serializable class in the jar to a crafted stream. The scan test fails on a Hazelcast upgrade until the file is
+  regenerated, and a missing or empty file stops the member. Not allowed: arbitrary JDK causes and suppressed lists.
 
 ## Results
 

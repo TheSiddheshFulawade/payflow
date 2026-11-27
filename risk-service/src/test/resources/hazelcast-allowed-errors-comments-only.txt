@@ -1,0 +1,4 @@
+# only comments and blank lines: an empty allow-list must stop the start
+
+   
+# nothing else

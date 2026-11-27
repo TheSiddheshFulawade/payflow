@@ -9,7 +9,14 @@ import com.hazelcast.config.MapConfig;
 import com.hazelcast.config.ServerSocketEndpointConfig;
 import com.siddheshfulawade.payflow.risk.domain.RiskLimits;
 import com.siddheshfulawade.payflow.risk.domain.VelocityWindow;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.List;
 
 /**
  * The embedded member: its port speaks the member protocol only, and every count has one synchronous backup.
@@ -26,6 +33,9 @@ final class HazelcastConfigFactory {
 
     /** Longer than the caller's own bound ({@link HazelcastVelocityCounter#CALL_TIMEOUT}), which ends the wait first. */
     private static final Duration OPERATION_CALL_TIMEOUT = Duration.ofSeconds(5);
+
+    /** Hazelcast's errors for the deserialization allow-list (see {@link #serializationFilter()}). */
+    static final String ALLOWED_ERRORS = "/hazelcast-allowed-errors.txt";
 
     static Config build(HazelcastProperties properties, RiskLimits limits) {
         Config config = new Config();
@@ -89,34 +99,59 @@ final class HazelcastConfigFactory {
 
     /**
      * Java deserialization creates exactly these classes, so no packages and no prefixes. Hazelcast's defaults would
-     * allow all of {@code java.*}.
+     * allow all of {@code java.*}, and a prefix such as {@code com.hazelcast.} would open every Serializable class in
+     * the jar, each one a possible gadget for a crafted stream from whoever reaches the member port.
+     *
+     * <p>Every Hazelcast error is listed, not only the ones the velocity check expects: an error response that can't be
+     * read leaves its operation unanswered, and that includes Hazelcast's internal ones. A join's partition migration
+     * that got {@code PartitionStateVersionMismatchException} back never finished, and the cluster stayed unsafe. The
+     * names come from {@value #ALLOWED_ERRORS}, generated from the jar scan in {@code HazelcastSerializationFilterTest},
+     * which fails on a Hazelcast upgrade until the file is regenerated.
      */
     private static JavaSerializationFilterConfig serializationFilter() {
         ClassFilter allowed = new ClassFilter()
                 .addClasses(VelocityWindow.class.getName(), VelocityEntryProcessor.class.getName())
                 // the fields of those two (CollSer is how Map.copyOf is serialized)
                 .addClasses("java.util.CollSer", "java.util.UUID", "java.lang.Long", "java.lang.Number")
-                // Hazelcast's own errors travel between members as Java objects: with these, a "partition is
-                // migrating, try again" is retried at once. An error that is missing here can't be read, and the check
-                // fails closed: it waits until the caller's bound (1 s), throws, and the sender re-sends the command.
+                // Hazelcast's own errors and their base classes: with these, a "partition is migrating, try again" is
+                // retried at once, and a member's internal operations get their error answers. An error that still
+                // can't be read (say, a JDK cause that is not listed) fails closed for a check: it waits until the
+                // caller's bound (1 s), throws, and the sender re-sends the command.
+                .addClasses(allowedErrors(ALLOWED_ERRORS).toArray(String[]::new))
+                // what those errors write besides strings and other errors: Throwable's stack trace and its empty
+                // suppressed list, and the member version that MemberLeftException writes (its address and UUID go as
+                // plain strings and longs). Its readObject rebuilds the Address from the host string, which resolves
+                // it: members are configured by IP, so no DNS lookup; a host name would cost one lookup per error read.
                 .addClasses(
-                        "com.hazelcast.core.HazelcastException",
-                        "com.hazelcast.core.HazelcastInstanceNotActiveException",
-                        "com.hazelcast.spi.exception.RetryableHazelcastException",
-                        "com.hazelcast.spi.exception.PartitionMigratingException",
-                        "com.hazelcast.spi.exception.WrongTargetException",
-                        "com.hazelcast.spi.exception.CallerNotMemberException",
-                        "com.hazelcast.spi.exception.TargetNotMemberException")
-                // the base classes and fields of those errors
-                .addClasses(
-                        "java.lang.Throwable",
-                        "java.lang.Exception",
-                        "java.lang.RuntimeException",
-                        "java.lang.IllegalStateException",
                         "java.lang.StackTraceElement",
                         "[Ljava.lang.StackTraceElement;",
-                        "java.util.Collections$EmptyList");
+                        "java.util.Collections$EmptyList",
+                        "com.hazelcast.version.MemberVersion");
         return new JavaSerializationFilterConfig().setDefaultsDisabled(true).setWhitelist(allowed);
+    }
+
+    /**
+     * The class names in a classpath resource: one per line, {@code #} starts a comment line. Fails closed: a missing or
+     * empty list stops the member start instead of starting a member that can't read its peers' errors.
+     */
+    static List<String> allowedErrors(String resource) {
+        InputStream in = HazelcastConfigFactory.class.getResourceAsStream(resource);
+        if (in == null) {
+            throw new IllegalStateException("Hazelcast error allow-list " + resource + " is not on the classpath");
+        }
+        List<String> names;
+        try (var reader = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
+            names = reader.lines()
+                    .map(String::strip)
+                    .filter(line -> !line.isEmpty() && !line.startsWith("#"))
+                    .toList();
+        } catch (IOException e) {
+            throw new UncheckedIOException("Hazelcast error allow-list " + resource + " can't be read", e);
+        }
+        if (names.isEmpty()) {
+            throw new IllegalStateException("Hazelcast error allow-list " + resource + " is empty");
+        }
+        return names;
     }
 
     private HazelcastConfigFactory() {}
