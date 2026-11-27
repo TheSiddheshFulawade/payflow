@@ -170,6 +170,36 @@ class HazelcastSerializationFilterTest {
         assertThat(refused).as("Hazelcast errors the filter refuses").isEmpty();
     }
 
+    /** The entries written out in HazelcastConfigFactory itself; everything else comes from the generated file. */
+    private static final List<String> EXPLICIT = List.of(
+            "com.siddheshfulawade.payflow.risk.domain.VelocityWindow",
+            "com.siddheshfulawade.payflow.risk.infra.VelocityEntryProcessor",
+            "java.util.CollSer",
+            "java.util.UUID",
+            "java.lang.Long",
+            "java.lang.Number",
+            "java.lang.StackTraceElement",
+            "[Ljava.lang.StackTraceElement;",
+            "java.util.Collections$EmptyList",
+            "com.hazelcast.version.MemberVersion");
+
+    @Test
+    @DisplayName("REQ-PF-032 the shipped error file is exactly the jar scan: nothing missing, nothing extra")
+    void allowedErrorsFileIsExactlyTheScan() throws Exception {
+        var file = HazelcastConfigFactory.allowedErrors(HazelcastConfigFactory.ALLOWED_ERRORS);
+
+        assertThat(file).containsExactlyInAnyOrderElementsOf(hazelcastThrowablesAndBases());
+    }
+
+    @Test
+    @DisplayName("REQ-PF-032 the allow-list is exactly the explicit entries plus the scan, not one class more")
+    void allowListIsExactlyExplicitPlusScan() throws Exception {
+        var expected = new TreeSet<String>(EXPLICIT);
+        expected.addAll(hazelcastThrowablesAndBases());
+
+        assertThat(filter().getWhitelist().getClasses()).containsExactlyInAnyOrderElementsOf(expected);
+    }
+
     @Test
     @DisplayName("REQ-PF-032 only Hazelcast errors are opened: other Hazelcast classes and look-alikes stay refused")
     void nothingButHazelcastErrorsIsOpened() throws Exception {

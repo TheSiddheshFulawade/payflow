@@ -120,7 +120,8 @@ final class HazelcastConfigFactory {
                 .addClasses(allowedErrors(ALLOWED_ERRORS).toArray(String[]::new))
                 // what those errors write besides strings and other errors: Throwable's stack trace and its empty
                 // suppressed list, and the member version that MemberLeftException writes (its address and UUID go as
-                // plain strings and longs)
+                // plain strings and longs). Its readObject rebuilds the Address from the host string, which resolves
+                // it: members are configured by IP, so no DNS lookup; a host name would cost one lookup per error read.
                 .addClasses(
                         "java.lang.StackTraceElement",
                         "[Ljava.lang.StackTraceElement;",
