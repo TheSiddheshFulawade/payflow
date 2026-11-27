@@ -119,7 +119,7 @@ class ReplyListenerTest extends PaymentIntegrationTest {
     @DisplayName("REQ-PF-021 a command that lands on a reply topic is dead-lettered without effect")
     void commandOnReplyTopicGoesToDeadLetter() {
         Payment p = newPayment();
-        Envelope command = Envelope.of(new ReserveFunds(p.id(), "alice", 500, "INR"), 1, Clock.systemUTC());
+        Envelope command = Envelope.of(new ReserveFunds(p.id(), "alice", 500, "INR", "local"), 1, Clock.systemUTC());
         Snapshot before = snapshotAll();
 
         send(Topics.RISK_REPLIES, command);

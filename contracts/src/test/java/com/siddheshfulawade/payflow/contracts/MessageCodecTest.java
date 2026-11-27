@@ -39,7 +39,7 @@ class MessageCodecTest {
     @Test
     void REQ_PF_020_max_amount_round_trips_exactly_as_a_json_number() {
         long amount = Checks.MAX_AMOUNT;
-        Envelope original = Envelope.of(new ReserveFunds(Samples.PAYMENT, "alice", amount, "INR"), 1, CLOCK);
+        Envelope original = Envelope.of(new ReserveFunds(Samples.PAYMENT, "alice", amount, "INR", "REQ"), 1, CLOCK);
 
         String json = codec.encode(original);
         Envelope decoded = codec.decode(json);
@@ -79,7 +79,7 @@ class MessageCodecTest {
 
     @Test
     void REQ_PF_020_missing_required_payload_field_is_a_poison_message() {
-        String json = codec.encode(Envelope.of(new ReserveFunds(Samples.PAYMENT, "alice", 5, "INR"), 1, CLOCK))
+        String json = codec.encode(Envelope.of(new ReserveFunds(Samples.PAYMENT, "alice", 5, "INR", "REQ"), 1, CLOCK))
                 .replaceFirst(",?\\s*\"currency\"\\s*:\\s*\"INR\"", "");
 
         assertThatThrownBy(() -> codec.decode(json)).isInstanceOf(PoisonMessageException.class);

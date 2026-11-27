@@ -189,7 +189,7 @@ and run on Ubuntu only) and `system` on Ubuntu (chaos tests, on every PR to main
 - [x] PF-05 payment-service API and saga happy path: validation, `Idempotency-Key`, state machine, outbox commands,
       reply handling, optimistic locking (REQ-PF-001, 002, 004, 010, 014)
 - [x] PF-06 Compensation, timeouts and sweeper; jqwik state-machine properties (REQ-PF-011 to 013)
-- [ ] PF-07 Security: resource servers in all three services, realm roles, owner check, problem details for 401/403,
+- [x] PF-07 Security: resource servers in all three services, realm roles, owner check, problem details for 401/403,
       one Keycloak container test (REQ-PF-003)
 - [ ] PF-08 Dockerfiles (layered Boot jars, non-root), full `compose.yaml`, `demo` script (PowerShell and sh) (REQ-PF-051)
 - [ ] PF-09 system-tests: end-to-end scenarios and chaos C1–C6 with the invariant checker; CI `system` job (REQ-PF-050)

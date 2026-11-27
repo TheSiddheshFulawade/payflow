@@ -34,7 +34,7 @@ class WalletDecisionsTest {
     }
 
     private ReserveFunds reserve(String payer, long amount) {
-        return new ReserveFunds(payment, payer, amount, "INR");
+        return new ReserveFunds(payment, payer, amount, "INR", "REQ");
     }
 
     private CaptureFunds capture(String payer, long amount) {

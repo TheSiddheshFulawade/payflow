@@ -20,7 +20,7 @@ class StrictDecodingTest {
     private final MessageCodec codec = new MessageCodec();
 
     private String reserveJson() {
-        return codec.encode(Envelope.of(new ReserveFunds(P, "alice", 100, "INR"), 1, CLOCK));
+        return codec.encode(Envelope.of(new ReserveFunds(P, "alice", 100, "INR", "REQ"), 1, CLOCK));
     }
 
     private void assertPoison(String json) {
@@ -67,8 +67,9 @@ class StrictDecodingTest {
     @Test
     void REQ_PF_004_amount_above_max_is_rejected_and_exactly_max_is_accepted() {
         assertThat(Checks.MAX_AMOUNT).isEqualTo(10_000_000L);
-        assertThat(new ReserveFunds(P, "alice", 10_000_000, "INR").amount()).isEqualTo(10_000_000L);
-        assertIllegal(() -> new ReserveFunds(P, "alice", 10_000_001, "INR"));
+        assertThat(new ReserveFunds(P, "alice", 10_000_000, "INR", "REQ").amount())
+                .isEqualTo(10_000_000L);
+        assertIllegal(() -> new ReserveFunds(P, "alice", 10_000_001, "INR", "REQ"));
         assertIllegal(() -> new CheckRisk(P, "alice", 10_000_001, "INR"));
         assertIllegal(() -> new CaptureFunds(P, "alice", "bob", 10_000_001, "INR"));
         assertIllegal(() -> new ReleaseFunds(P, "alice", 10_000_001));
@@ -83,7 +84,7 @@ class StrictDecodingTest {
     @ParameterizedTest
     @ValueSource(strings = {"EUR", "inr", "USD", "INR ", " INR", ""})
     void REQ_PF_004_currency_must_be_exactly_inr(String currency) {
-        assertIllegal(() -> new ReserveFunds(P, "alice", 100, currency));
+        assertIllegal(() -> new ReserveFunds(P, "alice", 100, currency, "REQ"));
         assertIllegal(() -> new CheckRisk(P, "alice", 100, currency));
         assertIllegal(() -> new CaptureFunds(P, "alice", "bob", 100, currency));
         assertPoison(reserveJson().replace("\"INR\"", "\"" + currency + "\""));
@@ -93,11 +94,11 @@ class StrictDecodingTest {
     void REQ_PF_004_text_longer_than_64_chars_is_rejected_at_64_accepted() {
         String ok = "a".repeat(64);
         String tooLong = "a".repeat(65);
-        assertThat(new ReserveFunds(P, ok, 1, "INR").payer()).isEqualTo(ok);
+        assertThat(new ReserveFunds(P, ok, 1, "INR", "REQ").payer()).isEqualTo(ok);
         assertThat(new FundsRejected(P, ok).reason()).isEqualTo(ok);
         assertThat(new RiskRejected(P, ok).rule()).isEqualTo(ok);
 
-        assertIllegal(() -> new ReserveFunds(P, tooLong, 1, "INR"));
+        assertIllegal(() -> new ReserveFunds(P, tooLong, 1, "INR", "REQ"));
         assertIllegal(() -> new CheckRisk(P, tooLong, 1, "INR"));
         assertIllegal(() -> new CaptureFunds(P, tooLong, "bob", 1, "INR"));
         assertIllegal(() -> new CaptureFunds(P, "alice", tooLong, 1, "INR"));
@@ -113,7 +114,7 @@ class StrictDecodingTest {
         assertIllegal(() -> new FundsRejected(P, " "));
         assertIllegal(() -> new CaptureFailed(P, ""));
         assertIllegal(() -> new RiskRejected(P, "  "));
-        assertIllegal(() -> new ReserveFunds(P, " ", 1, "INR"));
+        assertIllegal(() -> new ReserveFunds(P, " ", 1, "INR", "REQ"));
         assertPoison(reserveJson().replace("\"alice\"", "\" \""));
     }
 
@@ -122,7 +123,7 @@ class StrictDecodingTest {
     void REQ_PF_004_payer_and_payee_must_match_the_account_id_pattern(String bad) {
         // the argument is JSON-escaped text; the record check sees the unescaped value
         String raw = bad.replace("\\n", "\n").replace("\\\"", "\"");
-        assertIllegal(() -> new ReserveFunds(P, raw, 1, "INR"));
+        assertIllegal(() -> new ReserveFunds(P, raw, 1, "INR", "REQ"));
         assertIllegal(() -> new CaptureFunds(P, "alice", raw, 1, "INR"));
         assertPoison(reserveJson().replace("\"alice\"", "\"" + bad + "\""));
     }
@@ -153,7 +154,7 @@ class StrictDecodingTest {
 
     @Test
     void REQ_PF_020_error_for_bad_amount_names_the_field_but_not_the_values() {
-        String json = codec.encode(Envelope.of(new ReserveFunds(P, "SECRET-VALUE-abc", 100, "INR"), 1, CLOCK))
+        String json = codec.encode(Envelope.of(new ReserveFunds(P, "SECRET-VALUE-abc", 100, "INR", "REQ"), 1, CLOCK))
                 .replaceFirst("\"amount\"\\s*:\\s*100", "\"amount\":98765432");
 
         assertThatThrownBy(() -> codec.decode(json))

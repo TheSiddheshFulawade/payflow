@@ -20,6 +20,7 @@ import com.siddheshfulawade.payflow.payment.app.NewPayment;
 import com.siddheshfulawade.payflow.payment.app.PaymentService;
 import com.siddheshfulawade.payflow.payment.domain.Payment;
 import com.siddheshfulawade.payflow.payment.domain.PaymentState;
+import com.siddheshfulawade.payflow.payment.support.JwtDefaults;
 import com.siddheshfulawade.payflow.payment.support.PaymentFixtures;
 import java.util.Optional;
 import java.util.UUID;
@@ -30,6 +31,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -38,6 +40,7 @@ import org.springframework.test.web.servlet.ResultMatcher;
 
 /** POST and GET /api/v1/payments with a mocked service: status codes, validation, and error bodies. */
 @WebMvcTest
+@Import(JwtDefaults.class)
 class PaymentApiTest {
 
     private static final String PAYMENTS = "/api/v1/payments";
@@ -286,9 +289,9 @@ class PaymentApiTest {
     }
 
     @Test
-    @DisplayName("REQ-PF-004 a wrong method on the payments URL is a 405 problem")
+    @DisplayName("REQ-PF-003 a wrong method on the payments URL is a 403 problem: unmatched requests are denied")
     void wrongMethod() throws Exception {
-        mvc.perform(delete(PAYMENTS)).andExpect(problem(405));
+        mvc.perform(delete(PAYMENTS)).andExpect(problem(403));
     }
 
     // ---- GET /api/v1/payments/{id} ----

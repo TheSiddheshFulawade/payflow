@@ -3,6 +3,8 @@ package com.siddheshfulawade.payflow.wallet.domain;
 /** Why the wallet refused a command. The names travel in the replies and are stored with a REJECTED hold. */
 public enum RejectReason {
     WALLET_UNKNOWN,
+    /** The payer wallet belongs to someone other than the client who asked for the payment. */
+    OWNER_MISMATCH,
     /** The payer's wallet is not ACTIVE (frozen or closed). */
     WALLET_FROZEN,
     INSUFFICIENT_FUNDS,

@@ -192,6 +192,27 @@ Filled in task by task: what was chosen, the alternative, and why.
   can still time out.
 - **Index in a new migration `V3__overdue_index.sql`**. Alternative: edit `V2` - an applied migration must never change
   (Flyway checksum), and a partial index on `deadline_at` stays small because only in-flight payments have a deadline.
+- **Security in all three services (PF-07): audience checked by a custom `OAuth2TokenValidator`; deny by default;
+  roles from `realm_access.roles` without `ROLE_`**. Alternative: the `audiences` property of Boot - when empty it
+  checks nothing, so a config slip turns the check off without a sound; our validator also refuses a token without
+  `exp` (the standard check skips it) and a subject outside the one rule, in all three services. Spring Security 7's
+  protected-resource metadata filter cannot be switched off, so each chain removes it; that path is 401 like any other. Alternative to the final `denyAll()`: rules
+  for the known paths only - HEAD on a payment slipped past GET-only rules; now whatever no rule names is 401 or 403.
+  The 401, 403 and firewall 400 bodies are fixed problem details, and `WWW-Authenticate` has no `error_description`
+  (it would name the issuer or audience to someone probing). The issuer has no default: a missing `PAYFLOW_ISSUER_URI`
+  stops the start. The audience is shared by the three services, so it keeps foreign tokens out; roles separate the
+  services. Keycloak users have fixed ids so wallets seeded for them survive a realm reset.
+- **The owner check is in wallet-service: `ReserveFunds` carries `requester` (the creator's JWT `sub`)**. Alternative:
+  payment-service reads the wallet owner - no cross-service reads (the services share only messages), and the read
+  would race with changes. The check comes after `WALLET_UNKNOWN` and before frozen and funds (a stranger learns
+  nothing about a wallet), under the row lock, holds nothing, and the REJECTED decision is stored, so a re-send gets the
+  same answer and the owner cannot revive it. Another customer's payment or wallet gives the same 404 as an unknown id
+  (no existence leak).
+- **`ReserveFunds` gained a required field while the message version stays 1**. Alternative: version 2 now - nothing
+  is released (the repo is public, v1.0.0 is not out), so there are no old readers. Cost: a `ReserveFunds` already in
+  Kafka without `requester` is poison (dead-letter); after the deadline the sweeper re-sends a command rebuilt from the
+  payment row, now with `requester`, up to 3 times, then releases (the payment ends `REVERSED`, nothing held).
+  Deploy wallet-service first. After v1.0.0 a new required field means version 2 and a window where both are read.
 - **Every Hazelcast error is in the deserialization allow-list, as exact class names generated from a jar scan**
   (`hazelcast-allowed-errors.txt`, 124 names: 112 Hazelcast errors and 12 JDK and other base classes up to `Throwable`).
   Alternative: hand-pick the errors a velocity check expects - that missed `PartitionStateVersionMismatchException`, so

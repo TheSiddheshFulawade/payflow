@@ -160,7 +160,8 @@ class IgnoredAndPoisonRepliesTest extends PaymentIntegrationTest {
     @DisplayName("REQ-PF-021 a command on a reply topic is poison: nothing changes and no account id is in the text")
     void commandAsReplyIsPoison() {
         Payment p = newPayment();
-        Envelope command = Envelope.of(new ReserveFunds(p.id(), "alice-secret", 5, "INR"), 1, Clock.systemUTC());
+        Envelope command =
+                Envelope.of(new ReserveFunds(p.id(), "alice-secret", 5, "INR", "local"), 1, Clock.systemUTC());
 
         assertPoison(command, "alice-secret");
         assertThat(state(p.id())).isEqualTo("RESERVING");
@@ -169,8 +170,8 @@ class IgnoredAndPoisonRepliesTest extends PaymentIntegrationTest {
     @Test
     @DisplayName("REQ-PF-021 a command for an unknown payment on a reply topic is poison too")
     void commandForUnknownPaymentIsPoison() {
-        Envelope command =
-                Envelope.of(new ReserveFunds(UUID.randomUUID(), "alice-secret", 5, "INR"), 1, Clock.systemUTC());
+        Envelope command = Envelope.of(
+                new ReserveFunds(UUID.randomUUID(), "alice-secret", 5, "INR", "local"), 1, Clock.systemUTC());
 
         assertPoison(command, "alice-secret");
     }

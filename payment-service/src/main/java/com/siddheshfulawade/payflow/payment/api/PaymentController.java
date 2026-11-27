@@ -16,7 +16,7 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-/** Creating and reading payments. PF-07 adds the roles and the owner check. */
+/** Creating and reading payments. The roles are checked in the security filter chain (SecurityConfig). */
 @RestController
 @RequestMapping(PaymentController.PATH)
 class PaymentController {
@@ -49,8 +49,18 @@ class PaymentController {
                 .body(view);
     }
 
+    /**
+     * Invariant: a client reads only the payments it created (JWT {@code sub} = {@code client_id}). This is narrower than
+     * REQ-PF-003's "payer" rule: payment-service does not know wallet owners, and the wallet's owner check makes the
+     * creator the payer wallet's owner for every payment that held money. Someone else's payment is the same 404 as an
+     * unknown id, so the response does not tell whether the id exists.
+     */
     @GetMapping("/{id}")
     PaymentView read(@PathVariable UUID id) {
-        return payments.find(id).map(PaymentView::of).orElseThrow(() -> new PaymentNotFoundException(id));
+        String client = identity.clientId();
+        return payments.find(id)
+                .filter(payment -> payment.clientId().equals(client))
+                .map(PaymentView::of)
+                .orElseThrow(() -> new PaymentNotFoundException(id));
     }
 }

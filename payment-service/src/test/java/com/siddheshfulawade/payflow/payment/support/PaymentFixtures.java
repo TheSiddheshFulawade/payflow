@@ -32,6 +32,26 @@ public final class PaymentFixtures {
                 NOW);
     }
 
+    /** The same, created by another client (the JWT subject of the caller who made it). */
+    public static Payment paymentOf(String clientId, PaymentState state) {
+        Payment p = payment(state);
+        return new Payment(
+                p.id(),
+                clientId,
+                p.idempotencyKey(),
+                p.requestHash(),
+                p.payer(),
+                p.payee(),
+                p.amount(),
+                p.currency(),
+                p.state(),
+                p.stepAttempts(),
+                p.deadlineAt(),
+                p.version(),
+                p.createdAt(),
+                p.updatedAt());
+    }
+
     public static Payment payment(PaymentState state) {
         return payment(state, state == PaymentState.RECEIVED ? 0 : 1);
     }

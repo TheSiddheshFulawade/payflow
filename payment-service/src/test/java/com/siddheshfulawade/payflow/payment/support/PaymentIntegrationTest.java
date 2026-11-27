@@ -77,6 +77,10 @@ public abstract class PaymentIntegrationTest {
         registry.add("spring.kafka.consumer.auto-offset-reset", () -> "earliest");
         registry.add("spring.flyway.locations", () -> "classpath:db/messaging,classpath:db/migration");
         registry.add("payflow.messaging.relay.enabled", () -> "false");
+        // the resource server trusts the keys of TestIssuer (no Keycloak needed); the API tests send tokens signed by
+        // it
+        registry.add("spring.security.oauth2.resourceserver.jwt.issuer-uri", () -> TestIssuer.ISSUER);
+        registry.add("spring.security.oauth2.resourceserver.jwt.jwk-set-uri", TestIssuer::jwksUri);
     }
 
     @Autowired

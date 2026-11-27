@@ -18,6 +18,9 @@ public interface Wallets {
     /** Row-locks the wallets that exist among {@code ids}, in id order so that two callers cannot deadlock. */
     Map<String, Wallet> lock(Collection<String> ids);
 
+    /** The {@code owner_sub} of a wallet that exists (call it after {@link #lock}); it never changes. */
+    String ownerOf(String id);
+
     /** Available to held. */
     void reserve(UUID paymentId, String payer, long amount);
 

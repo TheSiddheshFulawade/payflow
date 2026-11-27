@@ -443,7 +443,7 @@ class SagaModelPropertyTest {
         private Command expectedCommand() {
             Payment p = payment;
             return switch (p.state()) {
-                case RESERVING -> new ReserveFunds(p.id(), p.payer(), p.amount(), p.currency());
+                case RESERVING -> new ReserveFunds(p.id(), p.payer(), p.amount(), p.currency(), p.clientId());
                 case RISK_CHECKING -> new CheckRisk(p.id(), p.payer(), p.amount(), p.currency());
                 case CAPTURING -> new CaptureFunds(p.id(), p.payer(), p.payee(), p.amount(), p.currency());
                 case RELEASING -> new ReleaseFunds(p.id(), p.payer(), p.amount());

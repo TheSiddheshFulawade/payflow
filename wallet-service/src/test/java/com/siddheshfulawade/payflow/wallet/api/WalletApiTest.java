@@ -21,6 +21,7 @@ import com.siddheshfulawade.payflow.wallet.app.WalletAlreadyExistsException;
 import com.siddheshfulawade.payflow.wallet.app.WalletNotFoundException;
 import com.siddheshfulawade.payflow.wallet.app.WalletView;
 import com.siddheshfulawade.payflow.wallet.domain.WalletStatus;
+import com.siddheshfulawade.payflow.wallet.support.JwtDefaults;
 import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -28,6 +29,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -36,6 +38,7 @@ import org.springframework.test.web.servlet.ResultMatcher;
 
 /** The ops and read endpoints with a mocked service: status codes, validation, and error bodies. */
 @WebMvcTest
+@Import(JwtDefaults.class)
 class WalletApiTest {
 
     private static final String OPS = "/api/v1/ops/wallets";
@@ -48,6 +51,24 @@ class WalletApiTest {
 
     private ResultActions postWallet(String json) throws Exception {
         return mvc.perform(post(OPS).contentType(MediaType.APPLICATION_JSON).content(json));
+    }
+
+    @Test
+    @DisplayName("REQ-PF-003 ownerSub follows the one subject rule: 64 printable ASCII chars are seeded, 65 are a 400")
+    void ownerSubIsAtMost64Chars() throws Exception {
+        postWallet("{\"id\":\"w-1\",\"ownerSub\":\"" + "s".repeat(64) + "\",\"initialBalance\":1}")
+                .andExpect(status().isCreated());
+
+        postWallet("{\"id\":\"w-2\",\"ownerSub\":\"" + "s".repeat(65) + "\",\"initialBalance\":1}")
+                .andExpect(problem(400));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"a\u0085b", "a\u2028b", "a\u202Eb", "a\u200Bb", "\u00e9"})
+    @DisplayName("REQ-PF-003 ownerSub with a Unicode line break, bidi or zero-width character or non-ASCII is a 400")
+    void ownerSubOutsidePrintableAscii(String ownerSub) throws Exception {
+        postWallet("{\"id\":\"w-1\",\"ownerSub\":\"" + ownerSub + "\",\"initialBalance\":1}")
+                .andExpect(problem(400));
     }
 
     private ResultActions putStatus(String id, String json) throws Exception {
@@ -164,9 +185,9 @@ class WalletApiTest {
     }
 
     @Test
-    @DisplayName("REQ-PF-004 a wrong method on the seed URL gets 405 problem+json")
+    @DisplayName("REQ-PF-004 a wrong method on the seed URL is refused by security first: 403 problem+json, not 405")
     void wrongMethodIsProblem() throws Exception {
-        mvc.perform(get(OPS)).andExpect(problem(405));
+        mvc.perform(get(OPS)).andExpect(problem(403));
     }
 
     // ---- PUT /api/v1/ops/wallets/{id}/status ----

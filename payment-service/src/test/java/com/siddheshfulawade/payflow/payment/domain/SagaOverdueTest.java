@@ -28,7 +28,7 @@ class SagaOverdueTest {
 
     private static Command currentCommand(Payment p) {
         return switch (p.state()) {
-            case RESERVING -> new ReserveFunds(p.id(), "alice", 2_500, "INR");
+            case RESERVING -> new ReserveFunds(p.id(), "alice", 2_500, "INR", "local");
             case RISK_CHECKING -> new CheckRisk(p.id(), "alice", 2_500, "INR");
             case CAPTURING -> new CaptureFunds(p.id(), "alice", "bob", 2_500, "INR");
             case RELEASING -> new ReleaseFunds(p.id(), "alice", 2_500);
