@@ -6,9 +6,13 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import com.hazelcast.cluster.Address;
+import com.hazelcast.cluster.impl.MemberImpl;
 import com.hazelcast.core.HazelcastException;
 import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.core.HazelcastInstanceNotActiveException;
+import com.hazelcast.core.MemberLeftException;
+import com.hazelcast.internal.partition.PartitionStateVersionMismatchException;
 import com.hazelcast.internal.serialization.InternalSerializationService;
 import com.hazelcast.internal.serialization.impl.DefaultSerializationServiceBuilder;
 import com.hazelcast.map.IMap;
@@ -17,6 +21,7 @@ import com.hazelcast.spi.exception.PartitionMigratingException;
 import com.hazelcast.spi.exception.RetryableHazelcastException;
 import com.hazelcast.spi.exception.TargetNotMemberException;
 import com.hazelcast.spi.exception.WrongTargetException;
+import com.hazelcast.version.MemberVersion;
 import com.siddheshfulawade.payflow.messaging.RetriedBySenderException;
 import com.siddheshfulawade.payflow.risk.app.VelocityUnavailableException;
 import com.siddheshfulawade.payflow.risk.domain.RiskLimits;
@@ -116,8 +121,7 @@ class HazelcastFailureTest {
     }
 
     static List<Throwable> errorsBetweenMembers() {
-        // every Hazelcast error the allow-list names, nothing else (the list is exact, see
-        // HazelcastSerializationFilterTest)
+        // the errors the velocity check expects; HazelcastSerializationFilterTest pins the whole list against the jar
         return List.of(
                 new HazelcastException("generic"),
                 new HazelcastInstanceNotActiveException("member is shutting down"),
@@ -141,6 +145,78 @@ class HazelcastFailureTest {
             Throwable received = serialization.toObject(serialization.toData(error));
 
             assertThat(received).isInstanceOf(error.getClass()).hasMessage(error.getMessage());
+        } finally {
+            serialization.dispose();
+        }
+    }
+
+    @Test
+    @DisplayName("REQ-PF-032 the error that stopped a member join is read back whole, so a migration gets its answer")
+    void partitionStateVersionMismatchRoundTrips() {
+        var error = new PartitionStateVersionMismatchException(3, 5);
+
+        Throwable received = roundTrip(error);
+
+        assertThat(received)
+                .isInstanceOf(PartitionStateVersionMismatchException.class)
+                .hasMessage(error.getMessage());
+    }
+
+    @Test
+    @DisplayName("REQ-PF-032 MemberLeftException is read back with its member's address, UUID and version")
+    void memberLeftRoundTrips() throws Exception {
+        // a literal IP: MemberLeftException.readObject resolves the host the sender wrote, so a literal keeps this test
+        // free of DNS. A crafted stream could name any host (see HazelcastConfigFactory#serializationFilter).
+        var member =
+                new MemberImpl(new Address("127.0.0.1", 5701), MemberVersion.of("5.7.0"), false, UUID.randomUUID());
+
+        var received = (MemberLeftException) roundTrip(new MemberLeftException(member));
+
+        assertThat(received.getMember().getAddress()).isEqualTo(member.getAddress());
+        assertThat(received.getMember().getUuid()).isEqualTo(member.getUuid());
+        assertThat(received.getMember().getVersion()).isEqualTo(member.getVersion());
+    }
+
+    @Test
+    @DisplayName("REQ-PF-032 an error with a Hazelcast cause is read back with its cause, not refused")
+    void errorWithCauseRoundTrips() {
+        var error = new HazelcastException("outer", new TargetNotMemberException("inner"));
+
+        Throwable received = roundTrip(error);
+
+        assertThat(received).isInstanceOf(HazelcastException.class).hasMessage("outer");
+        assertThat(received.getCause())
+                .isInstanceOf(TargetNotMemberException.class)
+                .hasMessage("inner");
+    }
+
+    private static Throwable roundTrip(Throwable error) {
+        var properties = new HazelcastProperties("c", 5701, List.of("127.0.0.1:5701"), "127.0.0.1");
+        InternalSerializationService serialization = new DefaultSerializationServiceBuilder()
+                .setConfig(HazelcastConfigFactory.build(properties, LIMITS).getSerializationConfig())
+                .build();
+        try {
+            return serialization.toObject(serialization.toData(error));
+        } finally {
+            serialization.dispose();
+        }
+    }
+
+    @Test
+    @DisplayName("REQ-PF-032 a Hazelcast error with an unlisted JDK cause is refused by the filter, not read")
+    void errorWithUnlistedJdkCauseIsRefused() {
+        var error = new HazelcastException("outer", new java.net.ConnectException("not on the list"));
+        var properties = new HazelcastProperties("c", 5701, List.of("127.0.0.1:5701"), "127.0.0.1");
+        InternalSerializationService serialization = new DefaultSerializationServiceBuilder()
+                .setConfig(HazelcastConfigFactory.build(properties, LIMITS).getSerializationConfig())
+                .build();
+        try {
+            var data = serialization.toData(error);
+
+            assertThat(catchThrowable(() -> serialization.toObject(data)))
+                    .hasRootCauseInstanceOf(SecurityException.class)
+                    .rootCause()
+                    .hasMessageContaining("java.net.ConnectException");
         } finally {
             serialization.dispose();
         }
