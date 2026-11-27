@@ -165,8 +165,8 @@ class HazelcastFailureTest {
     @Test
     @DisplayName("REQ-PF-032 MemberLeftException is read back with its member's address, UUID and version")
     void memberLeftRoundTrips() throws Exception {
-        // a literal IP: MemberLeftException.readObject rebuilds the Address, which resolves the host it was written
-        // with. A literal needs no DNS lookup; a host name in a real cluster would cost one lookup per error read.
+        // a literal IP: MemberLeftException.readObject resolves the host the sender wrote, so a literal keeps this test
+        // free of DNS. A crafted stream could name any host (see HazelcastConfigFactory#serializationFilter).
         var member =
                 new MemberImpl(new Address("127.0.0.1", 5701), MemberVersion.of("5.7.0"), false, UUID.randomUUID());
 
@@ -197,6 +197,26 @@ class HazelcastFailureTest {
                 .build();
         try {
             return serialization.toObject(serialization.toData(error));
+        } finally {
+            serialization.dispose();
+        }
+    }
+
+    @Test
+    @DisplayName("REQ-PF-032 a Hazelcast error with an unlisted JDK cause is refused by the filter, not read")
+    void errorWithUnlistedJdkCauseIsRefused() {
+        var error = new HazelcastException("outer", new java.net.ConnectException("not on the list"));
+        var properties = new HazelcastProperties("c", 5701, List.of("127.0.0.1:5701"), "127.0.0.1");
+        InternalSerializationService serialization = new DefaultSerializationServiceBuilder()
+                .setConfig(HazelcastConfigFactory.build(properties, LIMITS).getSerializationConfig())
+                .build();
+        try {
+            var data = serialization.toData(error);
+
+            assertThat(catchThrowable(() -> serialization.toObject(data)))
+                    .hasRootCauseInstanceOf(SecurityException.class)
+                    .rootCause()
+                    .hasMessageContaining("java.net.ConnectException");
         } finally {
             serialization.dispose();
         }

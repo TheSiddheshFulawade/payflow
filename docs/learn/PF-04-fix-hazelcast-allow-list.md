@@ -3,7 +3,7 @@
 Code: `risk-service/src/main/java/com/siddheshfulawade/payflow/risk/infra/HazelcastConfigFactory.java:111-130` and
 `risk-service/src/main/resources/hazelcast-allowed-errors.txt`. Requirement: REQ-PF-032. Background: the
 "Java deserialization filter" section of [PF-04-risk.md](PF-04-risk.md).
-Status: local `./mvnw -o -pl risk-service -am verify` green (127 tests, 0 failures). CI has not run it yet.
+Status: local `./mvnw -o -pl risk-service -am verify` green (129 tests, 0 failures). CI has not run it yet.
 
 ## What went wrong, in plain words
 
@@ -26,6 +26,9 @@ unreadable error does not fail loudly; it leaves an operation hanging.
   entries plus the scan (line 196). A Hazelcast upgrade that adds an error, or anyone who adds a class by hand,
   fails the build.
 - Missing or empty file: the member does not start (`HazelcastConfigFactory.java:137`). Fail closed.
+- Independent of the scan, every listed name must be a `Throwable` and no Hazelcast entry `DataSerializable`
+  (`HazelcastAllowedErrorsFileTest`), so loosening the scan can't slip other classes in. An unlisted JDK cause
+  (`ConnectException`) is refused.
 - Real round trips through the filter: `PartitionStateVersionMismatchException`, `MemberLeftException` with its
   member, and an error with a cause (`HazelcastFailureTest.java:155-190`).
 
@@ -44,8 +47,9 @@ Rejected: the prefix `com.hazelcast.` would open every Serializable class in the
 4. **Does this make the member port safe?** No. The port has no authentication in Hazelcast Community; the network
    is the control. The filter is a second layer, and it covers Java serialization only.
 5. **What does `MemberLeftException` add to the list, and why care?** It writes the member's version
-   (`MemberVersion`), so that class is listed too. Its `readObject` rebuilds the address from the host string;
-   members are configured by IP, so no DNS lookup happens while reading an error.
+   (`MemberVersion`), so that class is listed too. Its `readObject` resolves whatever host the *sender* wrote.
+   An honest member writes its bind IP (no lookup), but a crafted stream can force a DNS lookup per error read:
+   accepted, because the member port is trust-the-network anyway.
 
 ## TODO-ME
 
