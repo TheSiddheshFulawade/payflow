@@ -1,6 +1,7 @@
 package com.siddheshfulawade.payflow.wallet.api;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -12,6 +13,8 @@ import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.ResultActions;
 
@@ -108,5 +111,21 @@ class JwtValidationTest extends SecuredWebTest {
     @DisplayName("REQ-PF-003 an unsigned token (alg none) is a 401 problem")
     void unsigned() throws Exception {
         assertRefusedAsUnauthorized(TestIssuer.unsigned("user-ops", "ops"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"a\u0085b", "a\u2028b", "a\u202Eb", "a\u200Bb", "\u00e9", "a b", "a\nb"})
+    @DisplayName("REQ-PF-003 a token whose subject breaks the subject rule (printable ASCII only) is a 401 problem")
+    void badSubjectIsRefused(String subject) throws Exception {
+        assertRefusedAsUnauthorized(TestIssuer.valid(subject, "ops"));
+    }
+
+    @Test
+    @DisplayName("REQ-PF-003 a subject of 64 printable ASCII characters is accepted and 65 is a 401 problem")
+    void subjectLengthBoundary() throws Exception {
+        seedWith(TestIssuer.valid("x".repeat(64), "ops")).andExpect(status().isCreated());
+        reset(service); // the accepted seed above reached the service; the refused one below must not
+
+        assertRefusedAsUnauthorized(TestIssuer.valid("x".repeat(65), "ops"));
     }
 }

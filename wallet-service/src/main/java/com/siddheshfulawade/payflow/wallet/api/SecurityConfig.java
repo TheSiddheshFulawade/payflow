@@ -10,13 +10,15 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.oauth2.core.OAuth2TokenValidator;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
+import org.springframework.security.oauth2.server.resource.web.OAuth2ProtectedResourceMetadataFilter;
+import org.springframework.security.web.DefaultSecurityFilterChain;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.firewall.RequestRejectedHandler;
 
 /**
  * The wallet API is an OAuth 2.0 resource server. Only {@code GET /actuator/health} is open; everything else, even a
- * path that does not exist, is refused (401 without a valid token, 403 with one) (signature, issuer and expiry are checked by Boot from
- * {@code spring.security.oauth2.resourceserver.jwt.*}; the audience by {@link TokenRules}).
+ * path that does not exist, is refused (401 without a valid token, 403 with one). Signature, issuer and expiry are checked by Boot from
+ * {@code spring.security.oauth2.resourceserver.jwt.*}; the audience and the subject by {@link TokenRules}.
  *
  * <p>Invariant (REQ-PF-003): authentication and the role are decided here, in the filter chain, before the request
  * body is read or validated, so a caller without rights learns nothing about the API and nothing is stored.
@@ -31,13 +33,16 @@ class SecurityConfig {
     SecurityFilterChain apiSecurity(HttpSecurity http, SecurityProblems problems) throws Exception {
         JwtAuthenticationConverter converter = new JwtAuthenticationConverter();
         converter.setJwtGrantedAuthoritiesConverter(new RealmRoles());
-        return http
+        DefaultSecurityFilterChain chain = http
                 // bearer tokens only: no cookie, no session, so there is nothing for CSRF to forge
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(requests -> requests.requestMatchers(HttpMethod.GET, "/actuator/health")
                         .permitAll()
-                        .requestMatchers("/api/v1/ops/**")
+                        // each ops route names its own method; any other method or /api/v1/ops/** path falls to denyAll
+                        .requestMatchers(HttpMethod.POST, "/api/v1/ops/wallets")
+                        .hasAuthority(OPS)
+                        .requestMatchers(HttpMethod.PUT, "/api/v1/ops/wallets/*/status")
                         .hasAuthority(OPS)
                         // customers read their own wallet (WalletController checks the owner); ops read any
                         .requestMatchers(HttpMethod.GET, "/api/v1/wallets/*")
@@ -51,6 +56,12 @@ class SecurityConfig {
                 .exceptionHandling(
                         errors -> errors.authenticationEntryPoint(problems).accessDeniedHandler(problems))
                 .build();
+        // Spring Security 7 adds OAuth2ProtectedResourceMetadataFilter to every resource server, before authorization,
+        // and the configurer has no switch to turn it off. Without this line it would answer
+        // /.well-known/oauth-protected-resource to anyone with 200. Removed, that path is just an unknown path:
+        // denyAll.
+        chain.getFilters().removeIf(OAuth2ProtectedResourceMetadataFilter.class::isInstance);
+        return chain;
     }
 
     /**

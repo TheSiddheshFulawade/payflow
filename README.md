@@ -195,7 +195,8 @@ Filled in task by task: what was chosen, the alternative, and why.
 - **Security in all three services (PF-07): audience checked by a custom `OAuth2TokenValidator`; deny by default;
   roles from `realm_access.roles` without `ROLE_`**. Alternative: the `audiences` property of Boot - when empty it
   checks nothing, so a config slip turns the check off without a sound; our validator also refuses a token without
-  `exp` (the standard check skips it) and a subject outside the one rule. Alternative to the final `denyAll()`: rules
+  `exp` (the standard check skips it) and a subject outside the one rule, in all three services. Spring Security 7's
+  protected-resource metadata filter cannot be switched off, so each chain removes it; that path is 401 like any other. Alternative to the final `denyAll()`: rules
   for the known paths only - HEAD on a payment slipped past GET-only rules; now whatever no rule names is 401 or 403.
   The 401, 403 and firewall 400 bodies are fixed problem details, and `WWW-Authenticate` has no `error_description`
   (it would name the issuer or audience to someone probing). The issuer has no default: a missing `PAYFLOW_ISSUER_URI`

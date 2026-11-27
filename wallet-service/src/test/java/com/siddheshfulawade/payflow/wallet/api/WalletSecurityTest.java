@@ -14,6 +14,7 @@ import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -26,6 +27,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.ResultMatcher;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -204,5 +206,65 @@ class WalletSecurityTest extends SecuredWebTest {
         mvc.perform(get("/api/v1/wallets/w-1").with(as("sub-alic", READ))).andExpect(problem(404));
         mvc.perform(get("/api/v1/wallets/w-1").with(as("SUB-ALICE", READ))).andExpect(problem(404));
         mvc.perform(get("/api/v1/wallets/w-1").with(as("sub-alice-2", READ))).andExpect(problem(404));
+    }
+
+    @ParameterizedTest
+    @ValueSource(
+            strings = {"/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/api/v1/wallets"})
+    @DisplayName("REQ-PF-003 the OAuth protected-resource metadata path is refused without a token like any other")
+    void protectedResourceMetadataIsClosed(String path) throws Exception {
+        mvc.perform(get(path)).andExpect(problem(401));
+    }
+
+    // ---- ops routes: each allows only its own method; everything else under /api/v1/ops is refused by security ----
+
+    @ParameterizedTest
+    @ValueSource(strings = {"GET", "PUT", "PATCH", "DELETE"})
+    @DisplayName("REQ-PF-003 the seed route allows only POST: any other method with an ops token is 403, not 405")
+    void seedRouteAllowsOnlyPost(String method) throws Exception {
+        mvc.perform(request(HttpMethod.valueOf(method), "/api/v1/ops/wallets")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}")
+                        .with(as("sub-ops", OPS)))
+                .andExpect(problem(403));
+
+        verifyNoInteractions(service);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"GET", "POST", "PATCH", "DELETE"})
+    @DisplayName("REQ-PF-003 the status route allows only PUT: any other method with an ops token is 403, not 405")
+    void statusRouteAllowsOnlyPut(String method) throws Exception {
+        mvc.perform(request(HttpMethod.valueOf(method), "/api/v1/ops/wallets/w-1/status")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}")
+                        .with(as("sub-ops", OPS)))
+                .andExpect(problem(403));
+
+        verifyNoInteractions(service);
+    }
+
+    @ParameterizedTest
+    @ValueSource(
+            strings = {
+                "/api/v1/ops",
+                "/api/v1/ops/",
+                "/api/v1/ops/nothing",
+                "/api/v1/ops/wallets/w-1",
+                "/api/v1/ops/wallets/w-1/status/extra",
+                "/api/v1/ops/wallets/w-1/other"
+            })
+    @DisplayName("REQ-PF-003 an unknown path under /api/v1/ops with an ops token is 403, for every method")
+    void unknownOpsPathIsForbidden(String path) throws Exception {
+        for (HttpMethod method :
+                new HttpMethod[] {HttpMethod.GET, HttpMethod.POST, HttpMethod.PUT, HttpMethod.DELETE}) {
+            mvc.perform(request(method, path)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{}")
+                            .with(as("sub-ops", OPS)))
+                    .andExpect(problem(403));
+        }
+
+        verifyNoInteractions(service);
     }
 }

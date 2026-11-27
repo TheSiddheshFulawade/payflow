@@ -39,7 +39,7 @@ class ApiProblems extends ResponseEntityExceptionHandler {
     @ExceptionHandler
     ProblemDetail notFound(PaymentNotFoundException e) {
         ProblemDetail problem = problem(HttpStatus.NOT_FOUND, "payment-not-found", "Payment not found");
-        // no "instance": Spring would fill in the request path, which repeats the id the caller asked for
+        // a fixed instance: Spring would fill in the request path, which repeats the id the caller asked for
         problem.setInstance(URI.create(PaymentController.PATH));
         return problem;
     }
