@@ -20,9 +20,9 @@ request, and two services also check whose money is involved.
    (`SecurityConfig.java:42-45`); `ops` seeds and freezes wallets (wallet-service `SecurityConfig.java`).
 4. **Everything else is refused**: `anyRequest().denyAll()` (`SecurityConfig.java:46-48`).
 5. **The caller is the token's `sub`**, never a header or body field (`JwtClientIdentity.java`, `clientId()`).
-6. **You see only your own things.** A client reads only the payments it created (`sub` = `client_id`), which is
-   narrower than SPEC's "payer" rule: payment-service does not know wallet owners, and the wallet's owner check makes
-   creator = payer owner for every payment that held money. Someone else's payment gives the same 404 as an unknown id
+6. **You see only your own things.** A client reads only the payments it created (`sub` = `client_id`), as
+   REQ-PF-003 says: payment-service does not know wallet owners, and the wallet's owner check makes creator = payer
+   owner for every payment that held money. Someone else's payment gives the same 404 as an unknown id
    (`PaymentController.java`, `read`, the `filter` on `clientId`). Same for a wallet (`WalletController.java`, `read`
    and `mayRead`; `ops` may read any).
 7. **The wallet checks that the payer wallet belongs to the requester** before it holds any money
