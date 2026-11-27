@@ -1,9 +1,9 @@
 # Fix (PF-04 code, found in PF-07's CI): an error a member could not read stopped a cluster join
 
-Code: `risk-service/src/main/java/com/siddheshfulawade/payflow/risk/infra/HazelcastConfigFactory.java:111-130` and
+Code: `risk-service/src/main/java/com/siddheshfulawade/payflow/risk/infra/HazelcastConfigFactory.java:111-132` and
 `risk-service/src/main/resources/hazelcast-allowed-errors.txt`. Requirement: REQ-PF-032. Background: the
 "Java deserialization filter" section of [PF-04-risk.md](PF-04-risk.md).
-Status: local `./mvnw -o -pl risk-service -am verify` green (129 tests, 0 failures). CI has not run it yet.
+Status: merged in PR #11 (`8420308`), CI green on all 5 checks (run 46042717373); local risk verify 129 tests, 0 failures.
 
 ## What went wrong, in plain words
 
@@ -25,12 +25,12 @@ unreadable error does not fail loudly; it leaves an operation hanging.
   the file equals the scan (`HazelcastSerializationFilterTest.java:188`), and the whole whitelist equals the explicit
   entries plus the scan (line 196). A Hazelcast upgrade that adds an error, or anyone who adds a class by hand,
   fails the build.
-- Missing or empty file: the member does not start (`HazelcastConfigFactory.java:137`). Fail closed.
+- Missing or empty file: the member does not start (`HazelcastConfigFactory.java:141` and `:153`). Fail closed.
 - Independent of the scan, every listed name must be a `Throwable` and no Hazelcast entry `DataSerializable`
   (`HazelcastAllowedErrorsFileTest`), so loosening the scan can't slip other classes in. An unlisted JDK cause
   (`ConnectException`) is refused.
 - Real round trips through the filter: `PartitionStateVersionMismatchException`, `MemberLeftException` with its
-  member, and an error with a cause (`HazelcastFailureTest.java:155-190`).
+  member, and an error with a cause (`HazelcastFailureTest.java:155-191`).
 
 Rejected: the prefix `com.hazelcast.` would open every Serializable class in the jar, each one a possible gadget.
 
