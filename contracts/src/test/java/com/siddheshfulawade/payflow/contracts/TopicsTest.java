@@ -25,7 +25,7 @@ class TopicsTest {
     void REQ_PF_020_every_message_goes_to_its_services_topic() {
         java.util.UUID p = Samples.PAYMENT;
         Map<Message, String> expected = Map.ofEntries(
-                Map.entry(new ReserveFunds(p, "a", 1, "INR"), Topics.WALLET_COMMANDS),
+                Map.entry(new ReserveFunds(p, "a", 1, "INR", "REQ"), Topics.WALLET_COMMANDS),
                 Map.entry(new CaptureFunds(p, "a", "b", 1, "INR"), Topics.WALLET_COMMANDS),
                 Map.entry(new ReleaseFunds(p, "a", 1), Topics.WALLET_COMMANDS),
                 Map.entry(new CheckRisk(p, "a", 1, "INR"), Topics.RISK_COMMANDS),

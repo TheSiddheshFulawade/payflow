@@ -11,6 +11,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.siddheshfulawade.payflow.payment.app.ClientIdentity;
 import com.siddheshfulawade.payflow.payment.app.PaymentService;
+import com.siddheshfulawade.payflow.payment.support.JwtDefaults;
+import com.siddheshfulawade.payflow.payment.support.Tokens;
 import jakarta.servlet.ServletContext;
 import jakarta.servlet.ServletInputStream;
 import java.io.BufferedReader;
@@ -22,6 +24,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.AnnotationAwareOrderComparator;
 import org.springframework.core.env.Environment;
@@ -34,6 +37,7 @@ import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 /** Body size, strict JSON beyond the basics, and the stable problem types. */
 @WebMvcTest
+@Import(JwtDefaults.class)
 class RequestLimitsTest {
 
     private static final String PAYMENTS = "/api/v1/payments";
@@ -114,11 +118,11 @@ class RequestLimitsTest {
     }
 
     @Test
-    @DisplayName("REQ-PF-004 an unknown path is a 404 problem")
+    @DisplayName("REQ-PF-003 an unknown path is a 403 problem: unmatched requests are denied before routing")
     void unknownPath() throws Exception {
         mvc.perform(get("/api/v1/nothing"))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.type").value("urn:payflow:problem:not-found"));
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.type").value("urn:payflow:problem:forbidden"));
     }
 
     @Test
@@ -241,14 +245,19 @@ class RequestLimitsTest {
     }
 
     @Test
-    @DisplayName("REQ-PF-004 a plain DELETE without any length is not 411 (no body can follow on HTTP/1.1): it is 405")
+    @DisplayName(
+            "REQ-PF-004 a plain DELETE without any length is not 411 (no body can follow on HTTP/1.1): it is refused by the filter chain (403)")
     void plainDeleteIsNotLengthRequired() throws Exception {
         RawRequest[] seen = new RawRequest[1];
 
         mvc.perform(request(HttpMethod.DELETE, PAYMENTS + "/" + UUID.randomUUID())
-                        .with(raw(seen, -1, null)))
-                .andExpect(status().isMethodNotAllowed())
-                .andExpect(jsonPath("$.type").value("urn:payflow:problem:method-not-allowed"));
+                        .with(raw(seen, -1, null))
+                        // raw(...) replaces the request, dropping the default token; an anonymous DELETE is a 401.
+                        .with(Tokens.customer("local")))
+                // DELETE is not mapped, so the filter chain denies it (anyRequest().denyAll()): 403, in any case not
+                // 411
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.type").value("urn:payflow:problem:forbidden"));
     }
 
     // ---- multipart: switched off, so a malformed boundary cannot fail inside the container's parser ----
@@ -270,6 +279,6 @@ class RequestLimitsTest {
     @Test
     @DisplayName("REQ-PF-004 a GET without a body is not refused by the body limit")
     void getWithoutBodyIsUnaffected() throws Exception {
-        mvc.perform(get("/api/v1/nothing")).andExpect(status().isNotFound());
+        mvc.perform(get("/api/v1/nothing")).andExpect(status().isForbidden()); // denied, not 411 or 413
     }
 }

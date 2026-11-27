@@ -12,7 +12,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-/** Seeding and freezing wallets. PF-07 restricts it to the {@code ops} role. */
+/** Seeding and freezing wallets. Only the {@code ops} role may call it (SecurityConfig). */
 @RestController
 @RequestMapping("/api/v1/ops/wallets")
 class OpsWalletController {

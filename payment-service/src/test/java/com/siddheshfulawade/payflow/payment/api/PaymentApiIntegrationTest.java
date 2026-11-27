@@ -1,5 +1,6 @@
 package com.siddheshfulawade.payflow.payment.api;
 
+import static com.siddheshfulawade.payflow.payment.support.Tokens.customer;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -7,6 +8,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.siddheshfulawade.payflow.contracts.FundsReserved;
+import com.siddheshfulawade.payflow.contracts.ReserveFunds;
 import com.siddheshfulawade.payflow.payment.support.PaymentIntegrationTest;
 import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
@@ -25,7 +27,8 @@ class PaymentApiIntegrationTest extends PaymentIntegrationTest {
         return post(PAYMENTS)
                 .header("Idempotency-Key", key)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(json);
+                .content(json)
+                .with(customer("alice"));
     }
 
     private UUID idOf(MvcResult result) throws Exception {
@@ -92,28 +95,78 @@ class PaymentApiIntegrationTest extends PaymentIntegrationTest {
     }
 
     @Test
-    @DisplayName("REQ-PF-002 the client is fixed to 'local': a spoofed X-Client-Id header changes nothing")
-    void clientIdentityIgnoresHeaders() throws Exception {
+    @DisplayName("REQ-PF-002 the client is the token's subject: a spoofed X-Client-Id header changes nothing")
+    void clientIdentityIsTheSubject() throws Exception {
         String key = freshKey();
         UUID id = idOf(mvc.perform(postPayment(key, GOOD).header("X-Client-Id", "mallory"))
                 .andExpect(status().isAccepted())
                 .andReturn());
 
         assertThat(jdbc.queryForObject("select client_id from payment where id = ?", String.class, id))
-                .isEqualTo("local");
+                .isEqualTo("alice");
         mvc.perform(postPayment(key, GOOD).header("X-Client-Id", "someone-else"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id").value(id.toString()));
-        mvc.perform(postPayment(key, GOOD))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(id.toString()));
         assertThat(paymentRows()).isEqualTo(1);
     }
 
     @Test
+    @DisplayName("REQ-PF-002 the same Idempotency-Key from two different subjects makes two payments")
+    void keyIsScopedToTheSubject() throws Exception {
+        String key = freshKey();
+        UUID alices = idOf(mvc.perform(postPayment(key, GOOD)).andReturn());
+
+        UUID bobs = idOf(mvc.perform(postPayment(key, GOOD).with(customer("bob")))
+                .andExpect(status().isAccepted())
+                .andReturn());
+
+        assertThat(bobs).isNotEqualTo(alices);
+        assertThat(paymentRows()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("REQ-PF-003 the creator's subject travels in ReserveFunds as the requester")
+    void reserveFundsCarriesTheRequester() throws Exception {
+        UUID id = idOf(mvc.perform(postPayment(freshKey(), GOOD).with(customer("sub-777")))
+                .andExpect(status().isAccepted())
+                .andReturn());
+
+        assertThat(onlyOutbox(id, ReserveFunds.class).payload())
+                .isEqualTo(new ReserveFunds(id, "alice", 500, "INR", "sub-777"));
+    }
+
+    @Test
+    @DisplayName("REQ-PF-003 another customer gets 404 for my payment, and nothing about it changes")
+    void otherCustomerCannotReadMyPayment() throws Exception {
+        UUID id = idOf(mvc.perform(postPayment(freshKey(), GOOD)).andReturn());
+        Snapshot before = snapshotAll();
+
+        mvc.perform(get(PAYMENTS + "/" + id).with(customer("bob"))).andExpect(status().isNotFound());
+        mvc.perform(get(PAYMENTS + "/" + id).with(customer("alice"))).andExpect(status().isOk());
+
+        assertThat(snapshotAll()).isEqualTo(before);
+    }
+
+    @Test
+    @DisplayName("REQ-PF-003 without a token nothing is stored, and a 401 leaves no payment, event or message")
+    void noTokenStoresNothing() throws Exception {
+        mvc.perform(post(PAYMENTS)
+                        .header("Idempotency-Key", freshKey())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(GOOD))
+                .andExpect(status().isUnauthorized());
+
+        assertThat(paymentRows()).isZero();
+        assertThat(count("select count(*) from outbox")).isZero();
+    }
+
+    @Test
     @DisplayName("REQ-PF-004 an invalid request is a 400 problem and leaves no payment, event or message")
     void invalidRequestStoresNothing() throws Exception {
-        mvc.perform(post(PAYMENTS).contentType(MediaType.APPLICATION_JSON).content(GOOD))
+        mvc.perform(post(PAYMENTS)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(GOOD)
+                        .with(customer("alice")))
                 .andExpect(status().isBadRequest());
         mvc.perform(postPayment(freshKey(), GOOD.replace("500", "0"))).andExpect(status().isBadRequest());
         mvc.perform(postPayment(freshKey(), GOOD.replace("\"bob\"", "\"alice\"")))
@@ -146,7 +199,7 @@ class PaymentApiIntegrationTest extends PaymentIntegrationTest {
         UUID id = idOf(mvc.perform(postPayment(freshKey(), GOOD)).andReturn());
         deliver(reply(new FundsReserved(id)));
 
-        mvc.perform(get(PAYMENTS + "/" + id))
+        mvc.perform(get(PAYMENTS + "/" + id).with(customer("alice")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.state").value("RISK_CHECKING"))
                 .andExpect(jsonPath("$.payer").value("alice"))
@@ -159,7 +212,8 @@ class PaymentApiIntegrationTest extends PaymentIntegrationTest {
     @Test
     @DisplayName("REQ-PF-010 GET of an unknown id is 404 and of a malformed id is 400")
     void getUnknownAndMalformed() throws Exception {
-        mvc.perform(get(PAYMENTS + "/" + UUID.randomUUID())).andExpect(status().isNotFound());
-        mvc.perform(get(PAYMENTS + "/not-a-uuid")).andExpect(status().isBadRequest());
+        mvc.perform(get(PAYMENTS + "/" + UUID.randomUUID()).with(customer("alice")))
+                .andExpect(status().isNotFound());
+        mvc.perform(get(PAYMENTS + "/not-a-uuid").with(customer("alice"))).andExpect(status().isBadRequest());
     }
 }

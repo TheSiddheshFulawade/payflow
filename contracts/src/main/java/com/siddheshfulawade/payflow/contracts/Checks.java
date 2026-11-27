@@ -47,6 +47,14 @@ final class Checks {
         return value;
     }
 
+    /** A subject (the JWT {@code sub}) follows the one rule in {@link Subjects}. */
+    static String subject(String value, String name) {
+        if (!Subjects.isValid(value)) {
+            throw new InvalidField(name, "must be 1 to " + Subjects.MAX_LENGTH + " printable ASCII characters");
+        }
+        return value;
+    }
+
     /** Free text (reason, rule) is present, not blank and at most {@link #MAX_TEXT} chars. */
     static String text(String value, String name) {
         if (value == null || value.isBlank() || value.length() > MAX_TEXT) {

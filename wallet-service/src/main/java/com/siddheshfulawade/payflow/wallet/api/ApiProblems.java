@@ -5,11 +5,13 @@ import com.siddheshfulawade.payflow.wallet.app.WalletNotFoundException;
 import java.net.URI;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.web.firewall.RequestRejectedException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -20,15 +22,30 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
 /**
  * Every error is an RFC 9457 problem built here: a stable {@code type} and our own words. Text from exceptions (it can
  * quote input, SQL or connection details) goes to the log, never to the caller.
+ *
+ * <p>It also imports {@link SecurityConfig}: a {@code @WebMvcTest} slice scans controllers and advice but no
+ * {@code @Configuration}, so without the import such a test would run with Spring Boot's default security (CSRF on,
+ * no problem bodies) instead of what production runs.
  */
 @RestControllerAdvice
+@Import(SecurityConfig.class)
 class ApiProblems extends ResponseEntityExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(ApiProblems.class);
 
     @ExceptionHandler
     ProblemDetail notFound(WalletNotFoundException e) {
-        return problem(HttpStatus.NOT_FOUND, "wallet-not-found", "Wallet not found");
+        ProblemDetail problem = problem(HttpStatus.NOT_FOUND, "wallet-not-found", "Wallet not found");
+        // a fixed instance: Spring would fill in the request path, which repeats the id the caller asked for, and a
+        // foreign and an unknown wallet must give identical bodies
+        problem.setInstance(URI.create("/api/v1/wallets"));
+        return problem;
+    }
+
+    /** The security firewall checks a header when it is first read, which can be inside the controller call. */
+    @ExceptionHandler
+    ProblemDetail rejectedByFirewall(RequestRejectedException e) {
+        return problem(HttpStatus.BAD_REQUEST, "invalid-request", "Invalid request");
     }
 
     @ExceptionHandler

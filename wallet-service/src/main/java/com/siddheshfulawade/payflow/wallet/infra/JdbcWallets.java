@@ -49,6 +49,14 @@ class JdbcWallets implements Wallets {
     }
 
     @Override
+    public String ownerOf(String id) {
+        return jdbc.sql("select owner_sub from wallet where id = :id")
+                .param("id", id)
+                .query(String.class)
+                .single();
+    }
+
+    @Override
     public void reserve(UUID paymentId, String payer, long amount) {
         move(RESERVE, paymentId, payer, amount, """
                 update wallet set available = available - :amount, held = held + :amount, version = version + 1

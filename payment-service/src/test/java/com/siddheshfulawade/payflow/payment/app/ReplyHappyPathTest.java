@@ -209,6 +209,7 @@ class ReplyHappyPathTest extends PaymentIntegrationTest {
 
         assertThat(outbox(p.id()))
                 .singleElement()
-                .satisfies(e -> assertThat(e.payload()).isEqualTo(new ReserveFunds(p.id(), "alice", 500, "INR")));
+                .satisfies(
+                        e -> assertThat(e.payload()).isEqualTo(new ReserveFunds(p.id(), "alice", 500, "INR", "local")));
     }
 }

@@ -10,7 +10,7 @@ final class Samples {
 
     static List<Message> all() {
         return List.of(
-                new ReserveFunds(PAYMENT, "alice", 1_250, "INR"),
+                new ReserveFunds(PAYMENT, "alice", 1_250, "INR", "REQ"),
                 new CheckRisk(PAYMENT, "alice", 1_250, "INR"),
                 new CaptureFunds(PAYMENT, "alice", "bob", 1_250, "INR"),
                 new ReleaseFunds(PAYMENT, "alice", 1_250),

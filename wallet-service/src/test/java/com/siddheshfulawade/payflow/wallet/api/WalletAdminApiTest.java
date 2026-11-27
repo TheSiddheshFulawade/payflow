@@ -10,6 +10,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.siddheshfulawade.payflow.contracts.FundsRejected;
+import com.siddheshfulawade.payflow.wallet.support.Tokens;
 import com.siddheshfulawade.payflow.wallet.support.WalletIntegrationTest;
 import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
@@ -17,6 +18,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.ResultActions;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 /** The ops API against the real database: seeding, reading, freezing, and what freezing does to a reserve. */
 class WalletAdminApiTest extends WalletIntegrationTest {
@@ -24,8 +27,13 @@ class WalletAdminApiTest extends WalletIntegrationTest {
     @Autowired
     MockMvc mvc;
 
+    /** Every call of these tests is made by an ops user who may also read; security has its own tests. */
+    private ResultActions asOps(MockHttpServletRequestBuilder request) throws Exception {
+        return mvc.perform(request.with(Tokens.as("ops-user", Tokens.OPS, Tokens.READ)));
+    }
+
     private void seed(String id, long balance) throws Exception {
-        mvc.perform(post("/api/v1/ops/wallets")
+        asOps(post("/api/v1/ops/wallets")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"id\":\"" + id + "\",\"ownerSub\":\"sub-" + id + "\",\"initialBalance\":" + balance
                                 + "}"))
@@ -38,7 +46,7 @@ class WalletAdminApiTest extends WalletIntegrationTest {
     void seedAndRead() throws Exception {
         seed("alice", 5_000);
 
-        mvc.perform(get("/api/v1/wallets/alice"))
+        asOps(get("/api/v1/wallets/alice"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value("alice"))
                 .andExpect(jsonPath("$.ownerSub").value("sub-alice"))
@@ -57,7 +65,7 @@ class WalletAdminApiTest extends WalletIntegrationTest {
     void duplicateSeed() throws Exception {
         seed("alice", 5_000);
 
-        mvc.perform(post("/api/v1/ops/wallets")
+        asOps(post("/api/v1/ops/wallets")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"id\":\"alice\",\"ownerSub\":\"someone-else\",\"initialBalance\":99}"))
                 .andExpect(status().isConflict())
@@ -74,14 +82,12 @@ class WalletAdminApiTest extends WalletIntegrationTest {
     @Test
     @DisplayName("REQ-PF-030 reading an unknown wallet is 404 problem+json without internals")
     void unknownWallet() throws Exception {
-        mvc.perform(get("/api/v1/wallets/nope"))
-                .andExpect(status().isNotFound())
-                .andExpect(result -> {
-                    assertThat(result.getResponse().getContentType()).startsWith("application/problem+json");
-                    assertThat(result.getResponse().getContentAsString())
-                            .doesNotContain("Exception")
-                            .doesNotContain("com.siddheshfulawade");
-                });
+        asOps(get("/api/v1/wallets/nope")).andExpect(status().isNotFound()).andExpect(result -> {
+            assertThat(result.getResponse().getContentType()).startsWith("application/problem+json");
+            assertThat(result.getResponse().getContentAsString())
+                    .doesNotContain("Exception")
+                    .doesNotContain("com.siddheshfulawade");
+        });
     }
 
     @Test
@@ -89,11 +95,11 @@ class WalletAdminApiTest extends WalletIntegrationTest {
     void statusErrors() throws Exception {
         seed("alice", 100);
 
-        mvc.perform(put("/api/v1/ops/wallets/alice/status")
+        asOps(put("/api/v1/ops/wallets/alice/status")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"status\":\"BOGUS\"}"))
                 .andExpect(status().isBadRequest());
-        mvc.perform(put("/api/v1/ops/wallets/ghost/status")
+        asOps(put("/api/v1/ops/wallets/ghost/status")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"status\":\"FROZEN\"}"))
                 .andExpect(status().isNotFound());
@@ -106,14 +112,14 @@ class WalletAdminApiTest extends WalletIntegrationTest {
     @DisplayName("REQ-PF-030 a frozen wallet is read as FROZEN and the next ReserveFunds is rejected WALLET_FROZEN")
     void freezeBlocksReserve() throws Exception {
         seed("alice", 1_000);
-        mvc.perform(put("/api/v1/ops/wallets/alice/status")
+        asOps(put("/api/v1/ops/wallets/alice/status")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"status\":\"FROZEN\"}"))
                 .andExpect(status().isOk());
 
-        mvc.perform(get("/api/v1/wallets/alice")).andExpect(jsonPath("$.status").value("FROZEN"));
+        asOps(get("/api/v1/wallets/alice")).andExpect(jsonPath("$.status").value("FROZEN"));
         UUID payment = UUID.randomUUID();
-        var reply = apply(reserve(payment, "alice", 100));
+        var reply = apply(reserveAs("sub-alice", payment, "alice", 100, 1));
 
         assertThat(reply.payload()).isEqualTo(new FundsRejected(payment, "WALLET_FROZEN"));
         assertBalances("alice", 1_000, 0);
@@ -123,10 +129,36 @@ class WalletAdminApiTest extends WalletIntegrationTest {
     @DisplayName("REQ-PF-030 reads show the held amount after a reserve")
     void readShowsHold() throws Exception {
         seed("alice", 1_000);
-        apply(reserve(UUID.randomUUID(), "alice", 400));
+        apply(reserveAs("sub-alice", UUID.randomUUID(), "alice", 400, 1));
 
-        mvc.perform(get("/api/v1/wallets/alice"))
+        asOps(get("/api/v1/wallets/alice"))
                 .andExpect(jsonPath("$.available").value(600))
                 .andExpect(jsonPath("$.held").value(400));
+    }
+
+    @Test
+    @DisplayName("REQ-PF-003 the owner reads their own wallet from the database; another customer gets 404")
+    void ownerReadsOnlyTheirOwnWallet() throws Exception {
+        seed("alice", 5_000);
+
+        mvc.perform(get("/api/v1/wallets/alice").with(Tokens.as("sub-alice", Tokens.READ)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.available").value(5_000));
+        mvc.perform(get("/api/v1/wallets/alice").with(Tokens.as("sub-bob", Tokens.READ)))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("REQ-PF-003 without a token nothing is seeded: 401, no wallet, no ledger entry")
+    void noTokenSeedsNothing() throws Exception {
+        mvc.perform(post("/api/v1/ops/wallets")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"id\":\"alice\",\"ownerSub\":\"sub-alice\",\"initialBalance\":5}"))
+                .andExpect(status().isUnauthorized());
+
+        assertThat(jdbc.queryForObject("select count(*) from wallet", Integer.class))
+                .isZero();
+        assertThat(jdbc.queryForObject("select count(*) from ledger_entry", Integer.class))
+                .isZero();
     }
 }

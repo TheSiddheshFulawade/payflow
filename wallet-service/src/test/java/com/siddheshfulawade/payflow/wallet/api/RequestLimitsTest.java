@@ -11,6 +11,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.siddheshfulawade.payflow.wallet.app.WalletAdminService;
+import com.siddheshfulawade.payflow.wallet.support.JwtDefaults;
 import jakarta.servlet.ServletContext;
 import jakarta.servlet.ServletInputStream;
 import java.io.BufferedReader;
@@ -20,6 +21,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.AnnotationAwareOrderComparator;
 import org.springframework.core.env.Environment;
@@ -32,6 +34,7 @@ import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 /** Body size, strict JSON beyond the basics, ids in the path, and the stable problem types. */
 @WebMvcTest
+@Import(JwtDefaults.class)
 class RequestLimitsTest {
 
     private static final String OPS = "/api/v1/ops/wallets";
@@ -102,11 +105,11 @@ class RequestLimitsTest {
     }
 
     @Test
-    @DisplayName("REQ-PF-004 an unknown path is a 404 problem")
+    @DisplayName("REQ-PF-003 an unknown path is a 403 problem: unmatched requests are denied before routing")
     void unknownPath() throws Exception {
         mvc.perform(get("/api/v1/nothing"))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.type").value("urn:payflow:problem:not-found"));
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.type").value("urn:payflow:problem:forbidden"));
     }
 
     // ---- the body limit must run before Boot's FormContentFilter, which reads PUT/PATCH/DELETE form bodies ----
@@ -224,9 +227,7 @@ class RequestLimitsTest {
     @Test
     @DisplayName("REQ-PF-004 a GET without a body is not refused by the body limit")
     void getWithoutBodyIsUnaffected() throws Exception {
-        mvc.perform(get("/api/v1/nothing"))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.type").value("urn:payflow:problem:not-found"));
+        mvc.perform(get("/api/v1/nothing")).andExpect(status().isForbidden()); // denied, not 411 or 413
     }
 
     @ParameterizedTest

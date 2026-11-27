@@ -41,6 +41,8 @@ import org.springframework.transaction.annotation.Transactional;
  *   <li>crash before or after the reply is published: the reply is in the outbox; the relay sends it (again)
  *   <li>two copies of a command at once: the second waits on the hold row, then answers from the committed decision
  *   <li>a late ReserveFunds after ReleaseFunds: the RELEASED tombstone rejects it, so nothing stays held
+ *   <li>a redelivered or re-sent reserve after OWNER_MISMATCH answers from the REJECTED hold; the owner re-sending the
+ *       same payment id cannot revive it
  * </ul>
  */
 @Service
@@ -94,7 +96,16 @@ public class WalletCommandHandler {
     private Optional<RejectReason> refusalToReserve(ReserveFunds command) {
         // locked before the check: no other payment can spend the same money between the check and the update
         Wallet payer = wallets.lock(List.of(command.payer())).get(command.payer());
-        return payer == null ? Optional.of(RejectReason.WALLET_UNKNOWN) : payer.refusesReserve(command.amount());
+        if (payer == null) {
+            return Optional.of(RejectReason.WALLET_UNKNOWN);
+        }
+        // Invariant (REQ-PF-003): money is held only for the wallet's owner. This check comes before the status and
+        // balance checks, so a stranger learns nothing about a wallet (frozen, poor) that is not theirs. The owner
+        // never changes after seeding, and the row is locked, so the comparison cannot go stale. Exact match.
+        if (!command.requester().equals(wallets.ownerOf(payer.id()))) {
+            return Optional.of(RejectReason.OWNER_MISMATCH);
+        }
+        return payer.refusesReserve(command.amount());
     }
 
     private Reply release(ReleaseFunds command) {

@@ -141,7 +141,7 @@ class RiskIdempotencyTest extends RiskIntegrationTest {
     @Test
     @DisplayName("REQ-PF-021 a message that is not a risk command is poison and leaves no trace")
     void foreignCommandIsPoison() {
-        Envelope foreign = Envelope.of(new ReserveFunds(payment, payer, 100, "INR"), 1, Clock.systemUTC());
+        Envelope foreign = Envelope.of(new ReserveFunds(payment, payer, 100, "INR", "REQ"), 1, Clock.systemUTC());
 
         assertPoison(foreign, payer);
 
