@@ -10,6 +10,7 @@ import java.nio.file.Paths;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -108,6 +109,16 @@ class DemoScriptTest {
                 .contains("demo.ps1")
                 .contains("demo.sh");
         assertThat(root).contains("docker compose -f deploy/compose.yaml up").contains("demo.sh");
+    }
+
+    // TODO-ME: assert each script names the four payments (ok-1:2500, ok-2:1000, risk-limit:5000001,
+    // insufficient-funds:9000000). Check: remove @Disabled, run DemoScriptTest, then change an amount in demo.sh and
+    // see it fail.
+    @Disabled("TODO-ME")
+    @ParameterizedTest
+    @ValueSource(strings = {"demo.sh", "demo.ps1"})
+    void scriptsSendTheFourDemoPayments(String name) throws IOException {
+        // your assertions here
     }
 
     private static boolean bashWorks() {
