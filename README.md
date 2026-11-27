@@ -209,7 +209,8 @@ Filled in task by task: what was chosen, the alternative, and why.
   (no existence leak).
 - **`ReserveFunds` gained a required field while the message version stays 1**. Alternative: version 2 now - nothing
   is released (the repo is public, v1.0.0 is not out), so there are no old readers. Cost: a `ReserveFunds` already in
-  Kafka without `requester` is poison (dead-letter), and the sweeper re-sends a rebuilt command after the deadline.
+  Kafka without `requester` is poison (dead-letter); after the deadline the sweeper re-sends a command rebuilt from the
+  payment row, now with `requester`, up to 3 times, then releases (the payment ends `REVERSED`, nothing held).
   Deploy wallet-service first. After v1.0.0 a new required field means version 2 and a window where both are read.
 - **Every Hazelcast error is in the deserialization allow-list, as exact class names generated from a jar scan**
   (`hazelcast-allowed-errors.txt`, 124 names: 112 Hazelcast errors and their base classes). Alternative: hand-pick

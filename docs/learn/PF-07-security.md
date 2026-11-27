@@ -18,7 +18,9 @@ request, and two services also check whose money is involved.
    (`SecurityConfig.java:40-43`); `ops` seeds and freezes wallets (wallet-service `SecurityConfig.java`).
 4. **Everything else is refused**: `anyRequest().denyAll()` (`SecurityConfig.java:44-46`).
 5. **The caller is the token's `sub`**, never a header or body field (`JwtClientIdentity.java`, `clientId()`).
-6. **You see only your own things.** Someone else's payment gives the same 404 as an unknown id
+6. **You see only your own things.** A client reads only the payments it created (`sub` = `client_id`), which is
+   narrower than SPEC's "payer" rule: payment-service does not know wallet owners, and the wallet's owner check makes
+   creator = payer owner for every payment that held money. Someone else's payment gives the same 404 as an unknown id
    (`PaymentController.java`, `read`, the `filter` on `clientId`). Same for a wallet (`WalletController.java`, `read`
    and `mayRead`; `ops` may read any).
 7. **The wallet checks that the payer wallet belongs to the requester** before it holds any money
@@ -96,7 +98,7 @@ Hiding things at the API is not enough: the payer is a field in the request body
 Alice's wallet as payer. Money is held by wallet-service, which knows who owns each wallet (`owner_sub`). So:
 - payment-service puts the creator's `sub` in the command as `requester`;
 - wallet-service compares it with the wallet's owner (`WalletCommandHandler.java`, the `OWNER_MISMATCH` branch) and
-  replies `Rejected(OWNER_MISMATCH)`; the payment ends `REJECTED`.
+  replies `FundsRejected(OWNER_MISMATCH)`; the payment ends `REJECTED`.
 
 Details that matter, each with a test in `wallet-service/.../app/OwnerCheckTest.java`:
 - **Order**: after `WALLET_UNKNOWN` (no row, so no owner to compare), but **before** frozen and funds. A stranger must
@@ -132,7 +134,8 @@ Without fixed ids, a Keycloak reset would give Alice a new `sub` and her seeded 
 released yet. Consequences:
 - A `ReserveFunds` already in Kafka without `requester` is **poison** for the new wallet: decoding fails
   (`ReserveFundsRequesterTest.java:47`), it goes to the dead-letter topic (PF-02) and is never an unchecked reserve.
-  The payment's deadline then fires and the sweeper (PF-06) sends a rebuilt command, now with the requester.
+  The payment's deadline then fires and the sweeper (PF-06) re-sends a command rebuilt from the payment row, now with
+  the requester, up to 3 times; after that it releases, and the payment ends `REVERSED` with nothing held.
 - **Deploy wallet-service first**, so that no new command meets an old wallet that has no check.
 - After v1.0.0 a new required field means version 2, and a window where consumers read both versions.
 
@@ -148,7 +151,7 @@ Bob          PaymentController   Payment saga     Outbox -> Kafka     WalletComm
  |                                                                     | lock wallet row -------->|
  |                                                                     | owner_sub = alice != bob |
  |                                                                     | store REJECTED hold + reply (one tx)
- |                            |<------------- Rejected(OWNER_MISMATCH) -|                         |
+ |                            |<-------- FundsRejected(OWNER_MISMATCH) -|                         |
  |                            | RESERVING -> REJECTED (nothing was held, nothing to release)
  | GET /payments/{id} as bob   -> status REJECTED
  | GET /payments/{id} as carol -> 404, same body as an unknown id
@@ -183,8 +186,8 @@ in `ReserveFunds` under the row lock, replies `OWNER_MISMATCH` before it looks a
 
 **5. You added a required field to a Kafka message and kept version 1. Defend or attack that.**
 Defend: nothing is released, so there are no old readers to protect, and a message without the field is poison
-(dead-letter), never an unchecked reserve, which is the safe failure. The sweeper re-sends a rebuilt command after the
-deadline. Deploy the consumer (wallet) first. Attack: in production this breaks in-flight messages, so after v1.0.0 a
+(dead-letter), never an unchecked reserve, which is the safe failure. After the deadline the sweeper re-sends a command
+rebuilt from the payment row (with the requester) up to 3 times, then releases: the payment ends REVERSED. Deploy the consumer (wallet) first. Attack: in production this breaks in-flight messages, so after v1.0.0 a
 new required field must be version 2, with consumers reading both versions during the roll-out; an optional field with
 a safe default would not need that.
 
