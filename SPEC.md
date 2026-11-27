@@ -64,7 +64,7 @@ leaves the payer until capture, so compensation is always a hold release.
 
 | Step | Command (payment → X)                                    | Success reply   | Failure reply                                         | On failure                  |
 | ---- | -------------------------------------------------------- | --------------- | ----------------------------------------------------- | --------------------------- |
-| 1    | `ReserveFunds` → wallet                                  | `FundsReserved` | `FundsRejected` (insufficient, wallet frozen/unknown) | → `REJECTED`                |
+| 1    | `ReserveFunds` → wallet                                  | `FundsReserved` | `FundsRejected` (insufficient, wallet frozen/unknown, owner mismatch) | → `REJECTED`                |
 | 2    | `CheckRisk` → risk                                       | `RiskApproved`  | `RiskRejected` (rule id)                              | `ReleaseFunds` → `REVERSED` |
 | 3    | `CaptureFunds` → wallet (debit payer hold, credit payee) | `FundsCaptured` | `CaptureFailed` (payee frozen/closed)                 | `ReleaseFunds` → `REVERSED` |
 
@@ -102,10 +102,10 @@ API and security
   return the original payment (200) and create nothing; with a different body it shall return 422.
 - REQ-PF-003 Every endpoint except `GET /actuator/health` shall require a JWT issued by the configured Keycloak realm;
   `payments:write` to create, `payments:read` to read; a customer may read only the payments they created (JWT `sub`
-  = the payment's client id). The wallet's owner check makes the creator the payer wallet's owner for every payment
-  that held money; only a payment refused before any hold (e.g. `OWNER_MISMATCH`, `WALLET_UNKNOWN`) can have a
-  creator who is not the payer's owner, and only its creator can read it. `ops` role for seeding wallets, statements
-  and reconciliation.
+  = the payment's client id). The wallet holds money only when the payer wallet's owner is the creator, so every
+  payment that held money was created by the payer's owner. A payment that never held money (still reserving, refused
+  with `WALLET_UNKNOWN` or `OWNER_MISMATCH`, or released before any reserve) may have been created by someone else,
+  and only its creator can read it. `ops` role for seeding wallets, statements and reconciliation.
 - REQ-PF-004 Invalid input (amount ≤ 0, > 10,000,000 minor units, same payer and payee, unknown fields, wrong
   currency) shall return RFC 9457 problem details, never a stack trace.
 
