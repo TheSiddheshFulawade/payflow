@@ -30,7 +30,8 @@ With the stack up (`--wait` returns when every healthcheck passes):
 
 Both do the same: get tokens for `alice` and `ops` from Keycloak, seed a payer and a payee wallet through the ops API,
 send payments with an `Idempotency-Key`, poll each until `COMPLETED`, `REJECTED` or `REVERSED` (or a timeout), and
-print the states. The wallets get fresh random ids on every run.
+print the states. The wallets get new ids on every run. Expected: two `COMPLETED`, one `REVERSED` (over the
+single-payment risk limit after the hold, so the hold is released) and one `REJECTED` (insufficient funds).
 
 ## Memory budget
 

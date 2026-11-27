@@ -101,9 +101,11 @@ class ComposeHappyPathSystemTest {
         JsonNode payer = get(WALLETS + "/wallets/" + PAYER, ops);
         JsonNode payee = get(WALLETS + "/wallets/" + PAYEE, ops);
 
-        assertThat(payer.path("available").asLong() + payee.path("available").asLong())
-                .as("sum of available + held is the seeded total")
-                .isEqualTo(PAYER_BALANCE + PAYEE_BALANCE);
+        long total = payer.path("available").asLong()
+                + payer.path("held").asLong()
+                + payee.path("available").asLong()
+                + payee.path("held").asLong();
+        assertThat(total).as("sum of available + held is the seeded total").isEqualTo(PAYER_BALANCE + PAYEE_BALANCE);
         assertThat(payer.path("held").asLong() + payee.path("held").asLong())
                 .as("sum of held")
                 .isZero();

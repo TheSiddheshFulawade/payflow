@@ -14,7 +14,8 @@ $AliceSub = 'e45bda66-092a-4922-b8e0-b14c7b03b479'
 $BobSub = 'ffbff25f-7df1-4acc-a432-40ec070024f7'
 $TimeoutSeconds = 120
 
-$Run = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+# unique per run: Unix seconds plus a random suffix
+$Run = "$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())-$(Get-Random -Maximum 100000)"
 $Payer = "demo-payer-$Run"
 $Payee = "demo-payee-$Run"
 
@@ -50,13 +51,17 @@ Write-Host 'Getting tokens'
 $AliceToken = Get-Token 'alice' $AlicePassword
 $OpsToken = Get-Token 'ops' $OpsPassword
 
-Write-Host "Seeding wallets $Payer (100000) and $Payee (5000)"
-Add-Wallet $Payer $AliceSub 100000
+Write-Host "Seeding wallets $Payer (6000000) and $Payee (5000)"
+Add-Wallet $Payer $AliceSub 6000000
 Add-Wallet $Payee $BobSub 5000
 
 $failed = $false
-foreach ($spec in @(@('ok-1', 2500), @('ok-2', 1000), @('too-big', 9000000))) {
+# Expected: ok-1, ok-2 COMPLETED; risk-limit REVERSED (held, then over the single-payment limit of 5,000,000, so the
+# hold is released); insufficient-funds REJECTED (more than the payer has left, nothing is held).
+# A refused POST throws (ErrorActionPreference Stop), so it never shows up as a timeout.
+foreach ($spec in @(@('ok-1', 2500), @('ok-2', 1000), @('risk-limit', 5000001), @('insufficient-funds', 9000000))) {
     $id = Send-Payment $spec[0] $spec[1]
+    if (-not $id) { throw "payment $($spec[0]): no id in the answer" }
     $state = Wait-Terminal $id
     if ($state -like 'TIMEOUT*') { $failed = $true }
     Write-Host "payment $($spec[0]) amount=$($spec[1]) id=$id -> $state"

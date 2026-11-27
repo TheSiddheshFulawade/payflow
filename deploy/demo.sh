@@ -15,7 +15,8 @@ ALICE_SUB="e45bda66-092a-4922-b8e0-b14c7b03b479"
 BOB_SUB="ffbff25f-7df1-4acc-a432-40ec070024f7"
 TIMEOUT_SECONDS=120
 
-RUN="$(date +%s)"
+# unique per run: Unix seconds plus this shell's process id
+RUN="$(date +%s)-$$"
 PAYER="demo-payer-$RUN"
 PAYEE="demo-payee-$RUN"
 
@@ -40,6 +41,13 @@ send_payment() {
     | json_field id
 }
 
+# A refused POST (curl -f fails) or an answer without an id stops here, not as a TIMEOUT two minutes later.
+send_payment_checked() {
+  id="$(send_payment "$1" "$2")" || { echo "payment $1: POST failed" >&2; return 1; }
+  [ -n "$id" ] || { echo "payment $1: no id in the answer" >&2; return 1; }
+  echo "$id"
+}
+
 # Polls until COMPLETED, REJECTED or REVERSED; gives up after TIMEOUT_SECONDS.
 wait_terminal() {
   deadline=$(( $(date +%s) + TIMEOUT_SECONDS ))
@@ -59,15 +67,17 @@ echo "Getting tokens"
 ALICE_TOKEN="$(get_token alice "$ALICE_PASSWORD")"
 OPS_TOKEN="$(get_token ops "$OPS_PASSWORD")"
 
-echo "Seeding wallets $PAYER (100000) and $PAYEE (5000)"
-seed_wallet "$PAYER" "$ALICE_SUB" 100000
+echo "Seeding wallets $PAYER (6000000) and $PAYEE (5000)"
+seed_wallet "$PAYER" "$ALICE_SUB" 6000000
 seed_wallet "$PAYEE" "$BOB_SUB" 5000
 
 status=0
-for spec in "ok-1:2500" "ok-2:1000" "too-big:9000000"; do
+# Expected: ok-1, ok-2 COMPLETED; risk-limit REVERSED (held, then over the single-payment limit of 5,000,000, so the
+# hold is released); insufficient-funds REJECTED (more than the payer has left, nothing is held).
+for spec in "ok-1:2500" "ok-2:1000" "risk-limit:5000001" "insufficient-funds:9000000"; do
   name="${spec%%:*}"
   amount="${spec##*:}"
-  id="$(send_payment "$name" "$amount")"
+  id="$(send_payment_checked "$name" "$amount")" || { status=1; continue; }
   state="$(wait_terminal "$id")" || status=1
   echo "payment $name amount=$amount id=$id -> $state"
 done
