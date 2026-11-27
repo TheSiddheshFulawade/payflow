@@ -2,7 +2,7 @@
 
 Crash-safe payment orchestration: three Spring Boot microservices (payment, wallet, risk) over Kafka with an
 orchestrated saga, transactional outbox, idempotent consumers, Hazelcast velocity limits, Keycloak JWT security and
-a Spring Batch reconciliation job, proven by chaos tests. Owner: Siddhesh Fulawade (public repo, original work).
+a Spring Batch reconciliation job, proven by chaos tests. Owner: Siddhesh Fulawade (open source, MIT, original work).
 
 **SPEC.md is the source of truth** (requirements, design, tasks). Read it before any work. Decisions: `docs/adr/`.
 
