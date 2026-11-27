@@ -101,8 +101,11 @@ API and security
 - REQ-PF-002 When the same `Idempotency-Key` is sent again by the same client with the same body, payment-service shall
   return the original payment (200) and create nothing; with a different body it shall return 422.
 - REQ-PF-003 Every endpoint except `GET /actuator/health` shall require a JWT issued by the configured Keycloak realm;
-  `payments:write` to create, `payments:read` to read; a customer may read only payments where they are the payer;
-  `ops` role for seeding wallets, statements and reconciliation.
+  `payments:write` to create, `payments:read` to read; a customer may read only the payments they created (JWT `sub`
+  = the payment's client id). The wallet's owner check makes the creator the payer wallet's owner for every payment
+  that held money; only a payment refused before any hold (e.g. `OWNER_MISMATCH`, `WALLET_UNKNOWN`) can have a
+  creator who is not the payer's owner, and only its creator can read it. `ops` role for seeding wallets, statements
+  and reconciliation.
 - REQ-PF-004 Invalid input (amount ≤ 0, > 10,000,000 minor units, same payer and payee, unknown fields, wrong
   currency) shall return RFC 9457 problem details, never a stack trace.
 
