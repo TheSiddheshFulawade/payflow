@@ -28,6 +28,7 @@ class SecurityConfig {
 
     static final String WRITE = "payments:write";
     static final String READ = "payments:read";
+    static final String OPS = "ops";
 
     @Bean
     SecurityFilterChain apiSecurity(HttpSecurity http, SecurityProblems problems) throws Exception {
@@ -43,6 +44,9 @@ class SecurityConfig {
                         .hasAuthority(WRITE)
                         .requestMatchers(HttpMethod.GET, "/api/v1/payments/*")
                         .hasAuthority(READ)
+                        // reconciliation downloads the statement as ops; any other method falls to denyAll
+                        .requestMatchers(HttpMethod.GET, "/api/v1/ops/statements")
+                        .hasAuthority(OPS)
                         .anyRequest()
                         // no rule names it (other method or path): 401 without a token, else 403
                         .denyAll())

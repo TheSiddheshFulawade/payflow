@@ -3,3 +3,26 @@ spring:
     name: reconciliation
   main:
     web-application-type: none
+  # Defaults match deploy/compose.yaml. The password has no default on purpose: demo secrets live in deploy/ only.
+  datasource:
+    # logServerErrorDetail=false: row values stay out of logs
+    url: ${RECON_DB_URL:jdbc:postgresql://localhost:5432/recon?logServerErrorDetail=false}
+    username: ${RECON_DB_USER:recon}
+    password: ${RECON_DB_PASSWORD}
+    hikari:
+      data-source-properties:
+        logServerErrorDetail: "false"
+  batch:
+    jdbc:
+      # Flyway creates the Batch tables (V1__batch_schema.sql)
+      initialize-schema: never
+    job:
+      # the job starts with the application: arguments "businessDate=2026-11-26"
+      enabled: true
+
+payflow:
+  recon:
+    # where the two statements come from; the ops bearer token has no default
+    payment-url: ${RECON_PAYMENT_URL:http://localhost:8081}
+    wallet-url: ${RECON_WALLET_URL:http://localhost:8082}
+    ops-token: ${RECON_OPS_TOKEN:}
