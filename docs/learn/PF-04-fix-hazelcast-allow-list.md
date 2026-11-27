@@ -1,9 +1,9 @@
 # Fix (PF-04 code, found in PF-07's CI): an error a member could not read stopped a cluster join
 
-Code: `risk-service/src/main/java/com/siddheshfulawade/payflow/risk/infra/HazelcastConfigFactory.java:111-130` and
+Code: `risk-service/src/main/java/com/siddheshfulawade/payflow/risk/infra/HazelcastConfigFactory.java:111-132` and
 `risk-service/src/main/resources/hazelcast-allowed-errors.txt`. Requirement: REQ-PF-032. Background: the
 "Java deserialization filter" section of [PF-04-risk.md](PF-04-risk.md).
-Status: merged in PR #11 (`8420308`), CI green on all 5 checks; local risk verify 129 tests, 0 failures.
+Status: merged in PR #11 (`8420308`), CI green on all 5 checks (run 46042717373); local risk verify 129 tests, 0 failures.
 
 ## What went wrong, in plain words
 
