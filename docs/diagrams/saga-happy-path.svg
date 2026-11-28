@@ -1,0 +1,98 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 690" width="900" height="690" role="img" aria-labelledby="t d">
+<title id="t">PayFlow saga, happy path</title>
+<desc id="d">A client posts a payment with an Idempotency-Key and a JWT. payment-service stores it and moves it from RECEIVED to RESERVING in one transaction, with ReserveFunds in its outbox, and answers 202. Over Kafka, wallet-service holds the amount and answers FundsReserved; the payment is RISK_CHECKING. risk-service checks the per-payment limit, the daily total and the velocity limit and answers RiskApproved; the payment is CAPTURING. wallet-service takes the amount from the payer's held balance and adds it to the payee's available balance, answers FundsCaptured, and the payment is COMPLETED. The client reads the final state with a GET.</desc>
+<style>
+svg{--bg:#fff;--fg:#1f2328;--mu:#59636e;--ln:#8c959f;--bx:#f6f8fa;--bl:#d0d7de;--ac:#0969da;--ok:#1a7f37}
+@media (prefers-color-scheme: dark){svg{--bg:#0d1117;--fg:#e6edf3;--mu:#9198a1;--ln:#6e7681;--bx:#161b22;--bl:#30363d;--ac:#4493f8;--ok:#3fb950}}
+text{font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:12px;fill:var(--fg)}
+.bg{fill:var(--bg)}
+.h{font-size:13px;font-weight:600}
+.m{font-size:11px;fill:var(--mu)}
+.c{text-anchor:middle}
+.lb{paint-order:stroke;stroke:var(--bg);stroke-width:4px;stroke-linejoin:round}
+.bx{fill:var(--bx);stroke:var(--bl)}
+.life{stroke:var(--bl);stroke-width:1.5;stroke-dasharray:4 4}
+.ar{stroke:var(--ln);stroke-width:1.6;fill:none}
+.ah{fill:var(--ln)}
+.chip{fill:var(--bx);stroke:var(--ac)}
+.chip.ok{stroke:var(--ok);stroke-width:2}
+.st{font-size:11px;font-weight:600;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+.hl{opacity:0;animation:on 20s infinite}
+.hl line{stroke:var(--ac);stroke-width:3;stroke-dasharray:7 5;animation:go .8s linear infinite}
+.hl rect{fill:none;stroke:var(--ac);stroke-width:3}
+@keyframes on{0%{opacity:0}1.5%{opacity:1}9%{opacity:1}10.5%,100%{opacity:0}}
+@keyframes go{to{stroke-dashoffset:-24}}
+@media (prefers-reduced-motion: reduce){.hl{display:none}*{animation:none!important}}
+</style>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0 0L10 5L0 10z"/></marker></defs>
+<rect class="bg" width="900" height="690"/>
+
+<g>
+<line class="life" x1="70" y1="66" x2="70" y2="610"/>
+<line class="life" x1="250" y1="66" x2="250" y2="610"/>
+<line class="life" x1="440" y1="66" x2="440" y2="610"/>
+<line class="life" x1="620" y1="66" x2="620" y2="610"/>
+<line class="life" x1="800" y1="66" x2="800" y2="610"/>
+<rect class="bx" x="20" y="18" width="100" height="48" rx="6"/><text class="h c" x="70" y="46">client</text>
+<rect class="bx" x="180" y="18" width="140" height="48" rx="6"/><text class="h c" x="250" y="39">payment-service</text><text class="m c" x="250" y="56">orchestrator</text>
+<rect class="bx" x="380" y="18" width="120" height="48" rx="6"/><text class="h c" x="440" y="39">Kafka</text><text class="m c" x="440" y="56">key = payment id</text>
+<rect class="bx" x="550" y="18" width="140" height="48" rx="6"/><text class="h c" x="620" y="39">wallet-service</text><text class="m c" x="620" y="56">payer, payee wallets</text>
+<rect class="bx" x="730" y="18" width="140" height="48" rx="6"/><text class="h c" x="800" y="39">risk-service ×2</text><text class="m c" x="800" y="56">Hazelcast cluster</text>
+</g>
+
+<!-- 1 -->
+<line class="ar" x1="70" y1="110" x2="248" y2="110" marker-end="url(#a)"/>
+<text class="lb c" x="160" y="102">POST /api/v1/payments</text>
+<text class="m c" x="160" y="126">Idempotency-Key, JWT</text>
+<rect class="chip" x="180" y="134" width="140" height="22" rx="11"/><text class="st c" x="250" y="149">RECEIVED → RESERVING</text>
+<text class="m lb" x="330" y="149">one transaction: payment row + ReserveFunds in the outbox</text>
+<!-- 2 -->
+<line class="ar" x1="250" y1="185" x2="72" y2="185" marker-end="url(#a)"/>
+<text class="lb c" x="160" y="177">202 Accepted, Location</text>
+<!-- 3 -->
+<line class="ar" x1="250" y1="230" x2="618" y2="230" marker-end="url(#a)"/>
+<text class="lb c" x="440" y="222">ReserveFunds</text>
+<text class="m c" x="620" y="248">payer: available − amount, held + amount</text>
+<!-- 4 -->
+<line class="ar" x1="620" y1="280" x2="252" y2="280" marker-end="url(#a)"/>
+<text class="lb c" x="440" y="272">FundsReserved</text>
+<rect class="chip" x="190" y="290" width="120" height="22" rx="11"/><text class="st c" x="250" y="305">RISK_CHECKING</text>
+<!-- 5 -->
+<line class="ar" x1="250" y1="340" x2="798" y2="340" marker-end="url(#a)"/>
+<text class="lb c" x="520" y="332">CheckRisk</text>
+<text class="m c" x="800" y="358">per-payment limit,</text>
+<text class="m c" x="800" y="372">daily total, velocity</text>
+<!-- 6 -->
+<line class="ar" x1="800" y1="395" x2="252" y2="395" marker-end="url(#a)"/>
+<text class="lb c" x="520" y="387">RiskApproved</text>
+<rect class="chip" x="200" y="405" width="100" height="22" rx="11"/><text class="st c" x="250" y="420">CAPTURING</text>
+<!-- 7 -->
+<line class="ar" x1="250" y1="455" x2="618" y2="455" marker-end="url(#a)"/>
+<text class="lb c" x="440" y="447">CaptureFunds</text>
+<text class="m c" x="620" y="473">payer held − amount, payee available + amount</text>
+<text class="m c" x="620" y="487">(one transaction)</text>
+<!-- 8 -->
+<line class="ar" x1="620" y1="515" x2="252" y2="515" marker-end="url(#a)"/>
+<text class="lb c" x="440" y="507">FundsCaptured</text>
+<rect class="chip ok" x="200" y="525" width="100" height="22" rx="11"/><text class="st c" x="250" y="540">COMPLETED</text>
+<!-- 9 -->
+<line class="ar" x1="70" y1="575" x2="248" y2="575" marker-end="url(#a)"/>
+<text class="lb c" x="160" y="567">GET /api/v1/payments/{id}</text>
+<line class="ar" x1="250" y1="600" x2="72" y2="600" marker-end="url(#a)"/>
+<text class="lb c" x="160" y="594">200, state COMPLETED</text>
+
+<g class="hl" style="animation-delay:0s"><line x1="70" y1="110" x2="248" y2="110"/><rect x="180" y="134" width="140" height="22" rx="11"/></g>
+<g class="hl" style="animation-delay:2s"><line x1="250" y1="185" x2="72" y2="185"/></g>
+<g class="hl" style="animation-delay:4s"><line x1="250" y1="230" x2="618" y2="230"/></g>
+<g class="hl" style="animation-delay:6s"><line x1="620" y1="280" x2="252" y2="280"/><rect x="190" y="290" width="120" height="22" rx="11"/></g>
+<g class="hl" style="animation-delay:8s"><line x1="250" y1="340" x2="798" y2="340"/></g>
+<g class="hl" style="animation-delay:10s"><line x1="800" y1="395" x2="252" y2="395"/><rect x="200" y="405" width="100" height="22" rx="11"/></g>
+<g class="hl" style="animation-delay:12s"><line x1="250" y1="455" x2="618" y2="455"/></g>
+<g class="hl" style="animation-delay:14s"><line x1="620" y1="515" x2="252" y2="515"/><rect x="200" y="525" width="100" height="22" rx="11"/></g>
+<g class="hl" style="animation-delay:16s"><line x1="70" y1="575" x2="248" y2="575"/></g>
+<g class="hl" style="animation-delay:18s"><line x1="250" y1="600" x2="72" y2="600"/></g>
+
+<text class="m" x="20" y="642">Every arrow between the services is a Kafka message, written to the sender's outbox in the same database transaction</text>
+<text class="m" x="20" y="658">as its state change and published by a relay. No money leaves the payer before the capture. First-attempt deadlines:</text>
+<text class="m" x="20" y="674">reserve 10 s, risk 5 s, capture 10 s, doubling per re-send up to 30 s; then the compensation diagram takes over.</text>
+</svg>

@@ -1,0 +1,102 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 560" width="900" height="560" role="img" aria-labelledby="t d">
+<title id="t">PayFlow outbox and inbox</title>
+<desc id="d">payment-service changes the payment and inserts the outgoing message into its outbox table in one database transaction, so both commit or neither does. A relay selects unsent outbox rows with FOR UPDATE SKIP LOCKED, sends them to Kafka with acks=all and an idempotent producer, and marks them sent only after every acknowledgement; a crash before that sends them again. wallet-service handles each delivery in one transaction: it inserts the message id into its inbox; on the first delivery the insert adds a row, the effect runs and the reply goes into its outbox; on a redelivery of the same message id the insert adds nothing, there is no effect, and the stored reply is queued again. The Kafka offset is committed only after the database commit.</desc>
+<style>
+svg{--bg:#fff;--fg:#1f2328;--mu:#59636e;--ln:#8c959f;--bx:#f6f8fa;--bl:#d0d7de;--ac:#0969da;--ok:#1a7f37;--wn:#9a6700}
+@media (prefers-color-scheme: dark){svg{--bg:#0d1117;--fg:#e6edf3;--mu:#9198a1;--ln:#6e7681;--bx:#161b22;--bl:#30363d;--ac:#4493f8;--ok:#3fb950;--wn:#d29922}}
+text{font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:12px;fill:var(--fg)}
+.bg{fill:var(--bg)}
+.h{font-size:13px;font-weight:600}
+.m{font-size:11px;fill:var(--mu)}
+.c{text-anchor:middle}
+.k{font-size:11px;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+.lb{paint-order:stroke;stroke:var(--bg);stroke-width:4px;stroke-linejoin:round}
+.bx{fill:var(--bx);stroke:var(--bl)}
+.tx{fill:none;stroke:var(--ac);stroke-dasharray:6 4}
+.ok{fill:var(--bx);stroke:var(--ok);stroke-width:2}
+.dup{fill:var(--bx);stroke:var(--wn);stroke-width:2}
+.ar{stroke:var(--ln);stroke-width:1.6;fill:none}
+.ar.re{stroke-dasharray:5 4}
+.ah{fill:var(--ln)}
+.hl{opacity:0;animation:on 15s infinite}
+.hl line{stroke:var(--ac);stroke-width:3;stroke-dasharray:7 5;animation:go .8s linear infinite}
+.hl rect{fill:none;stroke:var(--ac);stroke-width:3}
+@keyframes on{0%{opacity:0}2%{opacity:1}15%{opacity:1}16.6%,100%{opacity:0}}
+@keyframes go{to{stroke-dashoffset:-24}}
+@media (prefers-reduced-motion: reduce){.hl{display:none}*{animation:none!important}}
+</style>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0 0L10 5L0 10z"/></marker></defs>
+<rect class="bg" width="900" height="560"/>
+
+<text class="h" x="20" y="24">Sender: payment-service</text>
+<rect class="bx" x="20" y="36" width="270" height="164" rx="6"/>
+<rect class="tx" x="30" y="46" width="250" height="96" rx="4"/>
+<text class="m" x="40" y="62">one database transaction</text>
+<text class="k" x="40" y="82">update payment set state, version+1</text>
+<text class="k" x="40" y="102">insert into outbox (ReserveFunds)</text>
+<text class="k" x="40" y="126">commit</text>
+<text class="m" x="92" y="126">both rows, or neither</text>
+<text class="m" x="34" y="166">crash before the commit: nothing was</text>
+<text class="m" x="34" y="182">stored, the client retries with its key</text>
+
+<line class="ar" x1="290" y1="118" x2="328" y2="118" marker-end="url(#a)"/>
+<text class="h" x="330" y="24">Relay (polls the outbox)</text>
+<rect class="bx" x="330" y="36" width="270" height="164" rx="6"/>
+<text class="k" x="344" y="60">select … where sent_at is null</text>
+<text class="k" x="344" y="78">for update skip locked</text>
+<text x="344" y="102">send: acks=all, idempotent producer</text>
+<text x="344" y="122">every ack in, then set sent_at</text>
+<text class="m" x="344" y="166">crash after the send, before sent_at:</text>
+<text class="m" x="344" y="182">sent again (delivery is at least once)</text>
+
+<line class="ar" x1="600" y1="118" x2="638" y2="118" marker-end="url(#a)"/>
+<rect class="bx" x="640" y="76" width="240" height="84" rx="6"/>
+<text class="h c" x="760" y="104">Kafka</text>
+<text class="m c" x="760" y="124">wallet.commands, wallet.replies, risk.…</text>
+<text class="m c" x="760" y="140">key = payment id (order per payment)</text>
+
+<line class="ar" x1="700" y1="160" x2="480" y2="256" marker-end="url(#a)"/>
+<text class="lb" x="520" y="212">first delivery</text>
+<line class="ar re" x1="800" y1="160" x2="760" y2="256" marker-end="url(#a)"/>
+<text class="lb" x="655" y="236">same message again</text>
+
+<text class="h" x="20" y="250">Receiver: wallet-service, one transaction per delivery</text>
+<rect class="bx" x="330" y="258" width="290" height="150" rx="6"/>
+<text class="k" x="344" y="282">insert into inbox(message_id)</text>
+<text class="k" x="344" y="300">on conflict do nothing</text>
+<text x="344" y="322">→ 1 row: run the effect (hold, balances)</text>
+<text x="344" y="342">reply FundsReserved into its outbox</text>
+<text x="344" y="362">and link it to the inbox row</text>
+<text class="m" x="344" y="392">commit; only then the Kafka offset</text>
+
+<rect class="bx" x="640" y="258" width="240" height="150" rx="6"/>
+<text class="k" x="654" y="282">insert into inbox(message_id)</text>
+<text class="k" x="654" y="300">on conflict do nothing</text>
+<text x="654" y="322">→ 0 rows: the id was seen</text>
+<text x="654" y="342">no effect; the stored reply is</text>
+<text x="654" y="362">queued again, same message id</text>
+
+<line class="ar" x1="475" y1="408" x2="475" y2="438" marker-end="url(#a)"/>
+<rect class="ok" x="375" y="440" width="200" height="34" rx="17"/>
+<text class="c" x="475" y="461">money held once</text>
+<line class="ar" x1="760" y1="408" x2="760" y2="438" marker-end="url(#a)"/>
+<rect class="dup" x="660" y="440" width="200" height="34" rx="17"/>
+<text class="c" x="760" y="461">no second effect</text>
+
+<text class="m" x="20" y="282">The inbox row, the effect and the</text>
+<text class="m" x="20" y="298">reply commit together. A crash</text>
+<text class="m" x="20" y="314">before the offset is committed</text>
+<text class="m" x="20" y="330">brings the record back, and the</text>
+<text class="m" x="20" y="346">inbox drops it.</text>
+
+<g class="hl" style="animation-delay:0s"><rect x="30" y="46" width="250" height="96" rx="4"/></g>
+<g class="hl" style="animation-delay:2.5s"><line x1="290" y1="118" x2="328" y2="118"/><rect x="330" y="36" width="270" height="164" rx="6"/></g>
+<g class="hl" style="animation-delay:5s"><line x1="600" y1="118" x2="638" y2="118"/><rect x="640" y="76" width="240" height="84" rx="6"/></g>
+<g class="hl" style="animation-delay:7.5s"><line x1="700" y1="160" x2="480" y2="256"/><rect x="330" y="258" width="290" height="150" rx="6"/></g>
+<g class="hl" style="animation-delay:10s"><line x1="475" y1="408" x2="475" y2="438"/><rect x="375" y="440" width="200" height="34" rx="17"/></g>
+<g class="hl" style="animation-delay:12.5s"><line x1="800" y1="160" x2="760" y2="256"/><rect x="640" y="258" width="240" height="150" rx="6"/><rect x="660" y="440" width="200" height="34" rx="17"/></g>
+
+<text class="m" x="20" y="508">All three services use this one outbox and inbox (the messaging module). The inbox catches a copy with the same</text>
+<text class="m" x="20" y="524">message id. A sweeper re-send has a new message id, so there the hold row (wallet) and the decision row (risk), both keyed by payment id,</text>
+<text class="m" x="20" y="540">decide once and give the stored answer again.</text>
+</svg>

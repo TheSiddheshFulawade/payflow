@@ -198,7 +198,7 @@ and run on Ubuntu only) and `system` on Ubuntu (chaos tests, on every PR to main
 - [x] PF-09 system-tests: end-to-end scenarios and chaos C1–C6 with the invariant checker; CI `system` job (REQ-PF-050)
 - [x] PF-10 Reconciliation: statement export endpoints, Spring Batch job (download, stage in chunks of 1,000, match,
       report), restart test, measured run of 100,000 payments (REQ-PF-040 to 042)
-- [ ] PF-11 README: architecture and saga diagrams, how to run, Decisions, chaos results table, reconciliation
+- [x] PF-11 README: architecture and saga diagrams, how to run, Decisions, chaos results table, reconciliation
       numbers; `docs/learn` complete
 - [ ] PF-12 Release v1.0.0 (tag) and the hand-back text for the portfolio project card
 
