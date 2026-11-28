@@ -1,10 +1,23 @@
 package com.siddheshfulawade.payflow.recon.infra;
 
+import jakarta.validation.constraints.NotBlank;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.DefaultValue;
+import org.springframework.validation.annotation.Validated;
 
-/** Where the statements come from. {@code opsToken} is a bearer token of the ops role; it is never logged. */
+/**
+ * Where the statements come from. {@code opsToken} is a bearer token of the ops role; it is never logged and has no
+ * default (a job without it would only download 401 pages, so the start fails). {@code maxStatementBytes} caps one
+ * download; {@code currency} is the only currency a statement line may have.
+ */
+@Validated
 @ConfigurationProperties("payflow.recon")
-record ReconProperties(String paymentUrl, String walletUrl, String opsToken) {
+record ReconProperties(
+        String paymentUrl,
+        String walletUrl,
+        @NotBlank String opsToken,
+        @DefaultValue("67108864") long maxStatementBytes,
+        @DefaultValue("INR") String currency) {
 
     @Override
     public String toString() {

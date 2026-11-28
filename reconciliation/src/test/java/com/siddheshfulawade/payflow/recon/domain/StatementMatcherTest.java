@@ -12,8 +12,9 @@ import org.junit.jupiter.params.provider.CsvSource;
 
 /**
  * REQ-PF-040. Status correspondence (the rule under test):
- * COMPLETED = CAPTURED (amounts must be equal); REVERSED = RELEASED (nothing may be captured);
- * REJECTED = REJECTED (nothing captured) or no wallet line at all (risk rejected it before any hold).
+ * COMPLETED = CAPTURED (amounts must be equal); REVERSED = RELEASED or REJECTED (nothing may be captured: a wallet that
+ * was down past the re-sends rejects the hold and compensation then reverses the payment); REJECTED = REJECTED
+ * (nothing captured). A payment without a wallet line is always MISSING_IN_WALLET: every reserve writes a hold row.
  * A status difference wins over an amount difference: amounts of different outcomes cannot be compared.
  */
 class StatementMatcherTest {
@@ -56,14 +57,22 @@ class StatementMatcherTest {
     }
 
     @Test
-    @DisplayName("REQ-PF-040 REJECTED with no wallet movement is MATCHED (rejected before any hold)")
-    void rejectedWithoutWalletLine() {
-        assertThat(single(pay(1, 500, "REJECTED"), null)).isEqualTo(Outcome.MATCHED);
+    @DisplayName(
+            "REQ-PF-040 REVERSED with a REJECTED wallet hold and nothing captured is MATCHED (compensation released a rejected hold)")
+    void reversedWithRejectedHold() {
+        assertThat(single(pay(1, 500, "REVERSED"), wal(1, 0, "REJECTED"))).isEqualTo(Outcome.MATCHED);
+    }
+
+    @Test
+    @DisplayName("REQ-PF-040 REVERSED with a REJECTED wallet line that captured money is AMOUNT_MISMATCH")
+    void reversedWithRejectedHoldButMoneyMoved() {
+        assertThat(single(pay(1, 500, "REVERSED"), wal(1, 500, "REJECTED"))).isEqualTo(Outcome.AMOUNT_MISMATCH);
     }
 
     @ParameterizedTest
-    @CsvSource({"COMPLETED", "REVERSED"})
-    @DisplayName("REQ-PF-040 COMPLETED or REVERSED without a wallet line is MISSING_IN_WALLET")
+    @CsvSource({"COMPLETED", "REVERSED", "REJECTED"})
+    @DisplayName(
+            "REQ-PF-040 any payment state without a wallet line is MISSING_IN_WALLET (every reserve writes a hold row)")
     void missingInWallet(String state) {
         assertThat(single(pay(1, 500, state), null)).isEqualTo(Outcome.MISSING_IN_WALLET);
     }
@@ -92,7 +101,6 @@ class StatementMatcherTest {
         "COMPLETED,RELEASED",
         "COMPLETED,REJECTED",
         "REVERSED,CAPTURED",
-        "REVERSED,REJECTED",
         "REJECTED,CAPTURED",
         "REJECTED,RELEASED"
     })
@@ -183,6 +191,65 @@ class StatementMatcherTest {
         assertThatThrownBy(() -> StatementMatcher.match(List.of(pay(1, 500, "COMPLETED")), twice))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining(id(1).toString());
+    }
+
+    // ---- midnight boundary: match(payments, wallets, adjacentPayments, adjacentWallets) ----
+    // payments/wallets are the lines of the business date D; adjacent* are the lines of D-1 and D+1. A payment line of
+    // D
+    // is compared with the wallet lines of D-1..D+1; a wallet line of D is reported only when no payment line of
+    // D-1..D+1 has its id (otherwise it is reported on the payment line's date).
+
+    @Test
+    @DisplayName("REQ-PF-040 a payment of D whose wallet line is on an adjacent day is MATCHED")
+    void windowPaymentMatchedByAdjacentWallet() {
+        List<ReconResult> results = StatementMatcher.match(
+                List.of(pay(1, 500, "COMPLETED")), List.of(), List.of(), List.of(wal(1, 500, "CAPTURED")));
+
+        assertThat(results).containsExactly(new ReconResult(id(1), Outcome.MATCHED));
+    }
+
+    @Test
+    @DisplayName("REQ-PF-040 a wallet line of D whose payment is on an adjacent day is not reported on D")
+    void windowWalletOfAdjacentPaymentIsNotReported() {
+        List<ReconResult> results = StatementMatcher.match(
+                List.of(), List.of(wal(1, 500, "CAPTURED")), List.of(pay(1, 500, "COMPLETED")), List.of());
+
+        assertThat(results).isEmpty();
+    }
+
+    @Test
+    @DisplayName("REQ-PF-040 a wallet line of D with no payment line on D-1, D or D+1 is still MISSING_IN_PAYMENTS")
+    void windowTrulyMissingPayment() {
+        List<ReconResult> results = StatementMatcher.match(
+                List.of(), List.of(wal(1, 500, "CAPTURED")), List.of(pay(2, 1, "COMPLETED")), List.of());
+
+        assertThat(results).containsExactly(new ReconResult(id(1), Outcome.MISSING_IN_PAYMENTS));
+    }
+
+    @Test
+    @DisplayName("REQ-PF-040 a payment of D with no wallet line on D-1, D or D+1 is still MISSING_IN_WALLET")
+    void windowTrulyMissingWallet() {
+        List<ReconResult> results = StatementMatcher.match(
+                List.of(pay(1, 500, "COMPLETED")), List.of(), List.of(), List.of(wal(2, 1, "CAPTURED")));
+
+        assertThat(results).containsExactly(new ReconResult(id(1), Outcome.MISSING_IN_WALLET));
+    }
+
+    @Test
+    @DisplayName("REQ-PF-040 a mismatch across midnight is still found (the window does not hide amount differences)")
+    void windowAmountMismatchAcrossMidnight() {
+        List<ReconResult> results = StatementMatcher.match(
+                List.of(pay(1, 500, "COMPLETED")), List.of(), List.of(), List.of(wal(1, 400, "CAPTURED")));
+
+        assertThat(results).containsExactly(new ReconResult(id(1), Outcome.AMOUNT_MISMATCH));
+    }
+
+    @Test
+    @DisplayName("REQ-PF-040 a non-terminal state on an adjacent day's payment line is refused")
+    void windowRefusesUnknownAdjacentState() {
+        assertThatThrownBy(
+                        () -> StatementMatcher.match(List.of(), List.of(), List.of(pay(1, 5, "RESERVING")), List.of()))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test

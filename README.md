@@ -223,6 +223,19 @@ Filled in task by task: what was chosen, the alternative, and why.
   and suppressed lists (a `ConnectException` cause is refused, tested). `MemberLeftException.readObject` resolves the
   host the sender wrote, so a crafted stream can force a DNS lookup; accepted, the member port is trust-the-network.
 
+- **Reconciliation compares a one-day window, reports a pair once on the payment line's date, and only reconciles
+  closed dates (today - 2 UTC or older)**. Alternative: compare only the same-day lines - a payment captured at 23:59
+  and completed at 00:01 is then MISSING_IN_WALLET on one day and MISSING_IN_PAYMENTS on the other, a false alarm every
+  midnight. A wider window hides real gaps; one day covers the settle time. The matcher takes the adjacent days' lines
+  only to find the other half, a repeat of an id with different content is refused, and a statement above 64 MiB, a
+  line in another currency or a bad date stops the run before anything is staged. A fresh run clears the date's staging
+  (a stale line never reaches the report); a restart keeps it.
+
+## Third-party
+
+`reconciliation/src/main/resources/db/migration/V1__batch_schema.sql` is copied from Spring Batch (Apache License 2.0,
+Copyright the Spring Batch authors).
+
 ## Results
 
 The chaos scenarios table and the reconciliation numbers arrive with PF-09 and PF-10.

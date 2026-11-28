@@ -8,6 +8,7 @@ import com.siddheshfulawade.payflow.recon.app.StatementSource;
 import com.siddheshfulawade.payflow.recon.domain.PaymentLine;
 import com.siddheshfulawade.payflow.recon.domain.ReconResult;
 import com.siddheshfulawade.payflow.recon.domain.WalletLine;
+import java.time.Clock;
 import org.springframework.batch.core.job.Job;
 import org.springframework.batch.core.job.builder.JobBuilder;
 import org.springframework.batch.core.repository.JobRepository;
@@ -31,9 +32,16 @@ import org.springframework.transaction.PlatformTransactionManager;
 @EnableConfigurationProperties(ReconProperties.class)
 class ReconJobConfig {
 
+    /** The closed-date rule reads "today" from here; UTC, the same day boundary as the statements. */
     @Bean
-    ReconciliationRun reconciliationRun(StatementSource source, StagingStore staging, ReportStore report) {
-        return new ReconciliationRun(source, staging, report);
+    Clock clock() {
+        return Clock.systemUTC();
+    }
+
+    @Bean
+    ReconciliationRun reconciliationRun(
+            StatementSource source, StagingStore staging, ReportStore report, Clock clock, ReconProperties properties) {
+        return new ReconciliationRun(source, staging, report, clock, properties.currency());
     }
 
     @Bean
@@ -51,7 +59,12 @@ class ReconJobConfig {
             PlatformTransactionManager transactions,
             ReconciliationRun run,
             StagingStore staging) {
-        var reader = new BusinessDateStep.Reader<PaymentLine>(run::downloadPayments);
+        // the first step of a job starts fresh: it clears the date's staging (a restart of a later step skips this
+        // step)
+        var reader = new BusinessDateStep.Reader<PaymentLine>(date -> {
+            run.startFresh(date);
+            return run.downloadPayments(date);
+        });
         var writer = new BusinessDateStep.Writer<PaymentLine>(staging::stagePayments);
         return new StepBuilder("stagePayments", repository)
                 .<PaymentLine, PaymentLine>chunk(Chunks.SIZE)

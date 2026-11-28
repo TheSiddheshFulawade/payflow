@@ -18,6 +18,7 @@ import com.siddheshfulawade.payflow.payment.app.ClientIdentity;
 import com.siddheshfulawade.payflow.payment.app.IdempotencyKeyReusedException;
 import com.siddheshfulawade.payflow.payment.app.NewPayment;
 import com.siddheshfulawade.payflow.payment.app.PaymentService;
+import com.siddheshfulawade.payflow.payment.app.Statements;
 import com.siddheshfulawade.payflow.payment.domain.Payment;
 import com.siddheshfulawade.payflow.payment.domain.PaymentState;
 import com.siddheshfulawade.payflow.payment.support.JwtDefaults;
@@ -54,6 +55,9 @@ class PaymentApiTest {
 
     @MockitoBean
     ClientIdentity identity;
+
+    @MockitoBean
+    Statements statements;
 
     @BeforeEach
     void identityIsLocal() {

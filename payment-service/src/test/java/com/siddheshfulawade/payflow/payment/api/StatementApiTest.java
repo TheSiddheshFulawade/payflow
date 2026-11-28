@@ -13,16 +13,15 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.siddheshfulawade.payflow.payment.app.StatementLine;
-import com.siddheshfulawade.payflow.payment.app.Statements;
 import com.siddheshfulawade.payflow.payment.support.SecuredWebTest;
 import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MvcResult;
 
 /** REQ-PF-040 and REQ-PF-003: the payment statement is a CSV for ops only; deny by default for everyone else. */
@@ -31,9 +30,6 @@ class StatementApiTest extends SecuredWebTest {
     private static final String URL = "/api/v1/ops/statements";
     private static final UUID A = UUID.fromString("00000000-0000-0000-0000-00000000000a");
     private static final UUID B = UUID.fromString("00000000-0000-0000-0000-00000000000b");
-
-    @MockitoBean
-    Statements statements;
 
     @Test
     @DisplayName("REQ-PF-040 ops get text/csv: header row, one line per payment, long minor units")
@@ -108,6 +104,30 @@ class StatementApiTest extends SecuredWebTest {
         assertThat(result.getResponse().getContentType()).startsWith("application/problem+json");
         assertThat(result.getResponse().getContentAsString()).doesNotContain("Exception");
         verifyNoInteractions(statements);
+    }
+
+    @Test
+    @DisplayName("REQ-PF-040 a date before 2000-01-01 or after tomorrow (UTC) is a 400 problem, not a 500")
+    void dateOutsideBounds() throws Exception {
+        LocalDate tooLate = LocalDate.now(ZoneOffset.UTC).plusDays(2);
+        for (String date : List.of("1999-12-31", "0001-01-01", "9999-12-31", tooLate.toString())) {
+            MvcResult result = mvc.perform(get(URL).param("date", date).with(as("ops-1", OPS)))
+                    .andExpect(status().isBadRequest())
+                    .andReturn();
+
+            assertThat(result.getResponse().getContentType()).startsWith("application/problem+json");
+            assertThat(result.getResponse().getContentAsString()).doesNotContain("Exception");
+        }
+        verifyNoInteractions(statements);
+    }
+
+    @Test
+    @DisplayName("REQ-PF-040 the bounds themselves are accepted: 2000-01-01 and tomorrow (UTC)")
+    void dateBoundsAreInclusive() throws Exception {
+        LocalDate tomorrow = LocalDate.now(ZoneOffset.UTC).plusDays(1);
+        for (String date : List.of("2000-01-01", tomorrow.toString())) {
+            mvc.perform(get(URL).param("date", date).with(as("ops-1", OPS))).andExpect(status().isOk());
+        }
     }
 
     @Test

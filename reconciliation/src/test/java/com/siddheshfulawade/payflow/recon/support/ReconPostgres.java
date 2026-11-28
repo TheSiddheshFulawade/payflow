@@ -20,5 +20,7 @@ public final class ReconPostgres {
         registry.add("spring.datasource.username", POSTGRES::getUsername);
         registry.add("spring.datasource.password", POSTGRES::getPassword);
         registry.add("spring.batch.job.enabled", () -> "false");
+        // the application has no default token and refuses to start without one; this is a test-only value
+        registry.add("payflow.recon.ops-token", () -> "test-only-token");
     }
 }

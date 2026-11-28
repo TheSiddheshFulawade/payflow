@@ -7,7 +7,7 @@ create table recon_staging_payment (
     business_date date   not null,
     payment_id    uuid   not null,
     -- minor units
-    amount        bigint not null,
+    amount        bigint not null check (amount >= 0),
     currency      text   not null,
     state         text   not null,
     primary key (business_date, payment_id),
@@ -18,7 +18,7 @@ create table recon_staging_wallet (
     business_date   date   not null,
     payment_id      uuid   not null,
     -- minor units
-    captured_amount bigint not null,
+    captured_amount bigint not null check (captured_amount >= 0),
     status          text   not null,
     primary key (business_date, payment_id),
     constraint staging_wallet_status_known check (status in ('CAPTURED', 'RELEASED', 'REJECTED'))

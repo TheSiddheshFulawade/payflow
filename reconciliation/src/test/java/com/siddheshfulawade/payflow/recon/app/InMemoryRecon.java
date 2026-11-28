@@ -44,14 +44,42 @@ final class InMemoryRecon implements StatementSource, StagingStore, ReportStore 
         return date + "/" + id;
     }
 
+    /** The business date that {@link #paymentStatement} and {@link #walletStatement} belong to. */
+    static final LocalDate DAY = LocalDate.parse("2026-11-26");
+
+    private final Map<LocalDate, List<PaymentLine>> paymentsOn = new java.util.HashMap<>();
+    private final Map<LocalDate, List<WalletLine>> walletsOn = new java.util.HashMap<>();
+    /** how many statement downloads were asked for, whatever the date */
+    int downloads;
+
+    /** Statements of another date; a date nobody set has empty statements (a day without payments). */
+    void on(LocalDate date, List<PaymentLine> payments, List<WalletLine> wallets) {
+        paymentsOn.put(date, new ArrayList<>(payments));
+        walletsOn.put(date, new ArrayList<>(wallets));
+    }
+
     @Override
     public List<PaymentLine> payments(LocalDate businessDate) {
-        return paymentStatement;
+        downloads++;
+        if (paymentsOn.containsKey(businessDate)) {
+            return paymentsOn.get(businessDate);
+        }
+        return businessDate.equals(DAY) ? paymentStatement : List.of();
     }
 
     @Override
     public List<WalletLine> wallets(LocalDate businessDate) {
-        return walletStatement;
+        downloads++;
+        if (walletsOn.containsKey(businessDate)) {
+            return walletsOn.get(businessDate);
+        }
+        return businessDate.equals(DAY) ? walletStatement : List.of();
+    }
+
+    @Override
+    public void clearStaging(LocalDate date) {
+        stagedPayments.keySet().removeIf(k -> k.startsWith(date + "/"));
+        stagedWallets.keySet().removeIf(k -> k.startsWith(date + "/"));
     }
 
     @Override

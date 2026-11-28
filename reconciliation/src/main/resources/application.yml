@@ -22,7 +22,8 @@ spring:
 
 payflow:
   recon:
-    # where the two statements come from; the ops bearer token has no default
+    # Where the two statements come from. Plain HTTP is for the local/compose network only; anywhere else use TLS.
+    # The ops token has no default: it is fetched at runtime and passed in from the environment, never committed.
     payment-url: ${RECON_PAYMENT_URL:http://localhost:8081}
     wallet-url: ${RECON_WALLET_URL:http://localhost:8082}
-    ops-token: ${RECON_OPS_TOKEN:}
+    ops-token: ${RECON_OPS_TOKEN}

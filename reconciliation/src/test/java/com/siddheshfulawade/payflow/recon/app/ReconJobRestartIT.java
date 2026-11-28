@@ -48,7 +48,8 @@ import org.springframework.test.context.DynamicPropertySource;
 @Import(ReconJobRestartIT.Stubs.class)
 class ReconJobRestartIT {
 
-    private static final LocalDate DAY = LocalDate.parse("2026-11-26");
+    // closed on any day the test runs: the job reconciles only D <= today (UTC) - 2
+    private static final LocalDate DAY = LocalDate.now(java.time.ZoneOffset.UTC).minusDays(3);
 
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry registry) {
@@ -61,9 +62,11 @@ class ReconJobRestartIT {
         List<PaymentLine> payments = new ArrayList<>();
         List<WalletLine> wallets = new ArrayList<>();
         volatile boolean failing;
+        final AtomicInteger downloads = new AtomicInteger();
 
         @Override
         public List<PaymentLine> payments(LocalDate businessDate) {
+            downloads.incrementAndGet();
             if (failing) {
                 throw new IllegalStateException("simulated HTTP 500");
             }
@@ -137,6 +140,7 @@ class ReconJobRestartIT {
         jdbc.execute("truncate table batch_step_execution_context, batch_step_execution, batch_job_execution_context,"
                 + " batch_job_execution_params, batch_job_execution, batch_job_instance");
         source.failing = false;
+        source.downloads.set(0);
         report.calls.set(0);
         report.failOnCall = -1;
     }
@@ -271,6 +275,78 @@ class ReconJobRestartIT {
 
         assertThat(second.getStatus()).isEqualTo(BatchStatus.COMPLETED);
         assertThat(resultRows(DAY)).isEqualTo(5);
+    }
+
+    @Test
+    @DisplayName("REQ-PF-041 a fresh job for a date clears that date's old staging rows; its report is untouched")
+    void freshRunClearsStaleStaging() throws Exception {
+        matching(3);
+        jdbc.update(
+                "insert into recon_staging_payment(business_date, payment_id, amount, currency, state)"
+                        + " values (?, ?, 1, 'INR', 'COMPLETED')",
+                DAY,
+                id(99));
+        jdbc.update(
+                "insert into recon_staging_wallet(business_date, payment_id, captured_amount, status)"
+                        + " values (?, ?, 1, 'CAPTURED')",
+                DAY,
+                id(98));
+
+        assertThat(launch(DAY).getStatus()).isEqualTo(BatchStatus.COMPLETED);
+
+        assertThat(jdbc.queryForObject(
+                        "select count(*) from recon_staging_payment where business_date = ?", Integer.class, DAY))
+                .isEqualTo(3);
+        assertThat(jdbc.queryForObject(
+                        "select count(*) from recon_staging_wallet where business_date = ?", Integer.class, DAY))
+                .isEqualTo(3);
+        assertThat(resultRows(DAY)).isEqualTo(3);
+        assertThat(jdbc.queryForObject(
+                        "select count(*) from recon_result where payment_id in (?, ?)", Integer.class, id(99), id(98)))
+                .isZero();
+    }
+
+    @Test
+    @DisplayName("REQ-PF-040 a date that is not closed (today or yesterday, UTC) fails the job before any download")
+    void openDateFailsTheJob() throws Exception {
+        matching(3);
+        LocalDate today = LocalDate.now(java.time.ZoneOffset.UTC);
+
+        for (LocalDate open : List.of(today, today.minusDays(1))) {
+            assertThat(launch(open).getStatus()).isEqualTo(BatchStatus.FAILED);
+            assertThat(resultRows(open)).isZero();
+        }
+        assertThat(source.downloads.get()).isZero();
+    }
+
+    @Test
+    @DisplayName("REQ-PF-040 a payment line in another currency fails the job and stages nothing")
+    void foreignCurrencyFailsTheJob() throws Exception {
+        matching(3);
+        source.payments.set(1, new PaymentLine(id(2), 2, "USD", "COMPLETED"));
+
+        assertThat(launch(DAY).getStatus()).isEqualTo(BatchStatus.FAILED);
+
+        assertThat(jdbc.queryForObject("select count(*) from recon_staging_payment", Integer.class))
+                .isZero();
+        assertThat(resultRows(DAY)).isZero();
+    }
+
+    @Test
+    @DisplayName("REQ-PF-040 the staging tables refuse a negative amount")
+    void stagingRefusesNegativeAmounts() {
+        assertThatThrownBy(() -> jdbc.update(
+                        "insert into recon_staging_payment(business_date, payment_id, amount, currency, state)"
+                                + " values (?, ?, -1, 'INR', 'COMPLETED')",
+                        DAY,
+                        id(1)))
+                .isInstanceOf(DataIntegrityViolationException.class);
+        assertThatThrownBy(() -> jdbc.update(
+                        "insert into recon_staging_wallet(business_date, payment_id, captured_amount, status)"
+                                + " values (?, ?, -1, 'CAPTURED')",
+                        DAY,
+                        id(1)))
+                .isInstanceOf(DataIntegrityViolationException.class);
     }
 
     @Test

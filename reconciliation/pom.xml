@@ -20,6 +20,11 @@
       <artifactId>spring-boot-starter</artifactId>
     </dependency>
     <dependency>
+      <!-- Bean Validation for @Validated ReconProperties (the ops token must not be blank); version from the BOM -->
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-validation</artifactId>
+    </dependency>
+    <dependency>
       <!-- Boot 4: the Batch job repository in a database (JDBC) is its own starter; it brings spring-boot-starter-jdbc. -->
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-batch-jdbc</artifactId>

@@ -30,7 +30,12 @@ class MeasuredRunSystemTest {
         int n = Integer.getInteger("recon.n", 10_000);
         InMemoryRecon ports = new InMemoryRecon();
         ports.generateMatching(n);
-        ReconciliationRun run = new ReconciliationRun(ports, ports, ports);
+        ReconciliationRun run = new ReconciliationRun(
+                ports,
+                ports,
+                ports,
+                java.time.Clock.fixed(java.time.Instant.parse("2026-12-01T00:00:00Z"), java.time.ZoneOffset.UTC),
+                "INR");
 
         long start = System.nanoTime();
         run.run(LocalDate.parse("2026-11-26"));

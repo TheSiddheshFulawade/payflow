@@ -23,6 +23,12 @@ class JdbcStagingStore implements StagingStore {
     }
 
     @Override
+    public void clearStaging(LocalDate businessDate) {
+        jdbc.update("delete from recon_staging_payment where business_date = ?", businessDate);
+        jdbc.update("delete from recon_staging_wallet where business_date = ?", businessDate);
+    }
+
+    @Override
     public void stagePayments(LocalDate businessDate, List<PaymentLine> chunk) {
         // Invariant (REQ-PF-041): "on conflict do update" makes staging a line twice leave one row (a rerun).
         jdbc.batchUpdate("""
