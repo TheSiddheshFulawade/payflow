@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.siddheshfulawade.payflow.contracts.MessageCodec;
 import com.siddheshfulawade.payflow.messaging.IdempotentConsumer;
 import com.siddheshfulawade.payflow.wallet.app.Holds;
+import com.siddheshfulawade.payflow.wallet.app.Statements;
 import com.siddheshfulawade.payflow.wallet.app.WalletAdminService;
 import com.siddheshfulawade.payflow.wallet.app.WalletCommandHandler;
 import com.siddheshfulawade.payflow.wallet.app.Wallets;
@@ -35,6 +36,9 @@ class WalletServiceApplicationHealthTest {
     // this stays a fast test without Docker.
     @MockitoBean
     Holds holds;
+
+    @MockitoBean
+    Statements statements;
 
     @MockitoBean
     Wallets wallets;

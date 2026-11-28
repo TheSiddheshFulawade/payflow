@@ -44,6 +44,8 @@ class SecurityConfig {
                         .hasAuthority(OPS)
                         .requestMatchers(HttpMethod.PUT, "/api/v1/ops/wallets/*/status")
                         .hasAuthority(OPS)
+                        .requestMatchers(HttpMethod.GET, "/api/v1/ops/statements")
+                        .hasAuthority(OPS)
                         // customers read their own wallet (WalletController checks the owner); ops read any
                         .requestMatchers(HttpMethod.GET, "/api/v1/wallets/*")
                         .hasAnyAuthority(READ, OPS)

@@ -11,6 +11,7 @@ import com.siddheshfulawade.payflow.payment.app.PaymentService;
 import com.siddheshfulawade.payflow.payment.app.PaymentSweeper;
 import com.siddheshfulawade.payflow.payment.app.Payments;
 import com.siddheshfulawade.payflow.payment.app.ReplyHandler;
+import com.siddheshfulawade.payflow.payment.app.Statements;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -35,6 +36,9 @@ class PaymentServiceApplicationHealthTest {
     // this stays a fast test without Docker.
     @MockitoBean
     Payments payments;
+
+    @MockitoBean
+    Statements statements;
 
     @MockitoBean
     PaymentService paymentService;
