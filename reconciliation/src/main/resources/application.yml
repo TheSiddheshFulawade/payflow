@@ -26,4 +26,5 @@ payflow:
     # The ops token has no default: it is fetched at runtime and passed in from the environment, never committed.
     payment-url: ${RECON_PAYMENT_URL:http://localhost:8081}
     wallet-url: ${RECON_WALLET_URL:http://localhost:8082}
-    ops-token: ${RECON_OPS_TOKEN}
+    # Empty when unset, so @NotBlank fails the start: an unresolved placeholder would bind as literal text.
+    ops-token: ${RECON_OPS_TOKEN:}

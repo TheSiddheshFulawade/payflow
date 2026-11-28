@@ -32,6 +32,26 @@ class ReconPropertiesTest {
         runner.run(context -> assertThat(context).hasFailed());
     }
 
+    @Test
+    @DisplayName("REQ-PF-040 with the shipped application.yml and RECON_OPS_TOKEN not set, the start fails"
+            + " (an unresolved placeholder must not pass as a token)")
+    void unsetEnvironmentVariableFailsWithShippedConfig() {
+        org.junit.jupiter.api.Assumptions.assumeTrue(
+                System.getenv("RECON_OPS_TOKEN") == null, "RECON_OPS_TOKEN is set in this environment");
+        new ApplicationContextRunner()
+                .withInitializer(new org.springframework.boot.test.context.ConfigDataApplicationContextInitializer())
+                .withUserConfiguration(Binding.class)
+                .run(context -> assertThat(context).hasFailed());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"0", "-1"})
+    @DisplayName("REQ-PF-040 a size cap that is not positive fails the start")
+    void sizeCapMustBePositive(String cap) {
+        runner.withPropertyValues("payflow.recon.ops-token=t", "payflow.recon.max-statement-bytes=" + cap)
+                .run(context -> assertThat(context).hasFailed());
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"", " ", "   "})
     @DisplayName("REQ-PF-040 a blank ops token fails the start")

@@ -69,7 +69,11 @@ public final class StatementMatcher {
         return new ArrayList<>(results.values());
     }
 
-    /** Adjacent lines are validated like the others; a repeat is fine only when it is the same line. */
+    /**
+     * Adjacent lines are validated like the others; a repeat is fine only when it is the same line. Not checked: an
+     * id on D and also on D-1/D+1 (D's line wins). Unreachable today: a payment row and a hold row each have one
+     * {@code updated_at}, so each id is on exactly one day per statement.
+     */
     private static Map<UUID, PaymentLine> lookupPayments(List<PaymentLine> lines) {
         Map<UUID, PaymentLine> byId = new TreeMap<>(BY_TEXT);
         for (PaymentLine line : lines) {

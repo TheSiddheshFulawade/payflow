@@ -1,6 +1,7 @@
 package com.siddheshfulawade.payflow.recon.infra;
 
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Positive;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 import org.springframework.validation.annotation.Validated;
@@ -16,7 +17,7 @@ record ReconProperties(
         String paymentUrl,
         String walletUrl,
         @NotBlank String opsToken,
-        @DefaultValue("67108864") long maxStatementBytes,
+        @DefaultValue("67108864") @Positive long maxStatementBytes,
         @DefaultValue("INR") String currency) {
 
     @Override
