@@ -195,12 +195,12 @@ and run on Ubuntu only) and `system` on Ubuntu (chaos tests, on every PR to main
 - [x] PF-07 Security: resource servers in all three services, realm roles, owner check, problem details for 401/403,
       one Keycloak container test (REQ-PF-003)
 - [x] PF-08 Dockerfiles (layered Boot jars, non-root), full `compose.yaml`, `demo` script (PowerShell and sh) (REQ-PF-051)
-- [x] PF-09 system-tests: end-to-end scenarios and chaos C1–C6 with the invariant checker; CI `system` job (REQ-PF-050)
+- [x] PF-09 system-tests: end-to-end scenarios and chaos C1–C5 (C6 cut, see §8) with the invariant checker; CI `system` job (REQ-PF-050)
 - [x] PF-10 Reconciliation: statement export endpoints, Spring Batch job (download, stage in chunks of 1,000, match,
       report), restart test, measured run of 100,000 payments (REQ-PF-040 to 042)
 - [x] PF-11 README: architecture and saga diagrams, how to run, Decisions, chaos results table, reconciliation
       numbers; `docs/learn` complete
-- [ ] PF-12 Release v1.0.0 (tag) and the hand-back text for the portfolio project card
+- [x] PF-12 Release v1.0.0 (tag) and the hand-back text for the portfolio project card
 
 Cut line if the deadline is at risk, in this order: C6 → the Keycloak container test (mock JWT only) → reconciliation
 size 10,000 → Windows CI for `verify`. **Never cut**: outbox/inbox, compensation, sweeper, chaos C1–C3, invariants.

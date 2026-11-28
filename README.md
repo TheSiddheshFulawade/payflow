@@ -7,9 +7,10 @@ no money lost or moved twice in the runs below.
 
 [![Licence: MIT](docs/badges/licence-mit.svg)](LICENSE)
 [![Java 21, CI on 21 and 25](docs/badges/java-21.svg)](.github/workflows/ci.yml)
-[![Release v1.0.0 planned, not tagged yet](docs/badges/release-v1.0.0.svg)](https://github.com/TheSiddheshFulawade/payflow/releases)
+[![Release v1.0.0](docs/badges/release-v1.0.0.svg)](https://github.com/TheSiddheshFulawade/payflow/releases/tag/v1.0.0)
 
-Open source (MIT). Nothing is hosted: you run it on your own machine with Docker Compose. The requirements, design and
+Open source (MIT). Nothing is hosted: you run it on your own machine with Docker Compose, from a clone or from
+[release v1.0.0](https://github.com/TheSiddheshFulawade/payflow/releases/tag/v1.0.0) ([notes](docs/releases/v1.0.0.md)). The requirements, design and
 tasks are in [SPEC.md](SPEC.md).
 
 ## What is checked
