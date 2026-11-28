@@ -7,6 +7,7 @@ import com.siddheshfulawade.payflow.payment.app.PaymentService;
 import com.siddheshfulawade.payflow.payment.app.PaymentSweeper;
 import com.siddheshfulawade.payflow.payment.app.Payments;
 import com.siddheshfulawade.payflow.payment.app.ReplyHandler;
+import com.siddheshfulawade.payflow.payment.app.Statements;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -38,6 +39,9 @@ public abstract class SecuredWebTest {
 
     @MockitoBean
     protected Payments payments;
+
+    @MockitoBean
+    protected Statements statements;
 
     @MockitoBean
     protected PaymentService service;

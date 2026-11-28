@@ -4,6 +4,7 @@ import com.siddheshfulawade.payflow.contracts.MessageCodec;
 import com.siddheshfulawade.payflow.messaging.IdempotentConsumer;
 import com.siddheshfulawade.payflow.wallet.WalletServiceApplication;
 import com.siddheshfulawade.payflow.wallet.app.Holds;
+import com.siddheshfulawade.payflow.wallet.app.Statements;
 import com.siddheshfulawade.payflow.wallet.app.WalletAdminService;
 import com.siddheshfulawade.payflow.wallet.app.WalletCommandHandler;
 import com.siddheshfulawade.payflow.wallet.app.Wallets;
@@ -38,6 +39,9 @@ public abstract class SecuredWebTest {
 
     @MockitoBean
     protected Holds holds;
+
+    @MockitoBean
+    protected Statements statements;
 
     @MockitoBean
     protected Wallets wallets;

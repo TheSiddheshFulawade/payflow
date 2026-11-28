@@ -11,6 +11,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.siddheshfulawade.payflow.payment.app.ClientIdentity;
 import com.siddheshfulawade.payflow.payment.app.PaymentService;
+import com.siddheshfulawade.payflow.payment.app.Statements;
 import com.siddheshfulawade.payflow.payment.support.JwtDefaults;
 import com.siddheshfulawade.payflow.payment.support.Tokens;
 import jakarta.servlet.ServletContext;
@@ -57,6 +58,9 @@ class RequestLimitsTest {
 
     @MockitoBean
     ClientIdentity identity;
+
+    @MockitoBean
+    Statements statements;
 
     @Test
     @DisplayName("REQ-PF-004 a body over 16 KiB is 413 and never read")
