@@ -45,8 +45,9 @@ class ReconPropertiesTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"0", "-1"})
-    @DisplayName("REQ-PF-040 a size cap that is not positive fails the start")
+    @ValueSource(strings = {"0", "-1", "2147483639", "9223372036854775807"})
+    @DisplayName("REQ-PF-040 a size cap that is not positive, or too large to read as one array (cap + 1 would"
+            + " overflow or the body would be cut short), fails the start")
     void sizeCapMustBePositive(String cap) {
         runner.withPropertyValues("payflow.recon.ops-token=t", "payflow.recon.max-statement-bytes=" + cap)
                 .run(context -> assertThat(context).hasFailed());

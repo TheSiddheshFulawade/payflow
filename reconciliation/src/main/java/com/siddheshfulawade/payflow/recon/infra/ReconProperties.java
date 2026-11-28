@@ -1,5 +1,6 @@
 package com.siddheshfulawade.payflow.recon.infra;
 
+import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Positive;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -17,7 +18,11 @@ record ReconProperties(
         String paymentUrl,
         String walletUrl,
         @NotBlank String opsToken,
-        @DefaultValue("67108864") @Positive long maxStatementBytes,
+        // at most the largest array the JVM allocates (Integer.MAX_VALUE - 9): above it, cap + 1 overflows or the
+        // body is cut short without an error
+        @DefaultValue("67108864") @Positive @Max(Integer.MAX_VALUE - 9)
+        long maxStatementBytes,
+
         @DefaultValue("INR") String currency) {
 
     @Override
