@@ -1,9 +1,13 @@
 # LOCAL DEMO VALUE - every password in this file is a demo value for a laptop, never reuse anywhere real.
+#
+# Build the jars first: ./mvnw -DskipTests package   (the Dockerfiles copy target/*.jar, no Maven inside Docker).
+# Memory budget (mem_limit, summed): postgres 512m + kafka 1g + keycloak 1g + 4 apps x 768m = 5.5 GB.
 name: payflow
 
 services:
   postgres:
     image: postgres:18.7-alpine3.24
+    mem_limit: 512m
     environment:
       POSTGRES_PASSWORD: postgres # LOCAL DEMO VALUE - never reuse anywhere real
     ports:
@@ -19,8 +23,11 @@ services:
 
   kafka:
     image: apache/kafka:4.4.0
+    mem_limit: 1g
     # Single broker, KRaft combined mode (broker + controller in one process), no external coordinator.
     environment:
+      # heap well under mem_limit: the rest is page cache, metaspace and threads
+      KAFKA_HEAP_OPTS: "-Xms512m -Xmx512m"
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
@@ -46,16 +53,202 @@ services:
 
   keycloak:
     image: quay.io/keycloak/keycloak:26.8.2
+    mem_limit: 1g
     # Dev-file storage (no database): users and tokens reset when the container is removed.
     command: ["start-dev", "--import-realm"]
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin # LOCAL DEMO VALUE - never reuse anywhere real
       KC_BOOTSTRAP_ADMIN_PASSWORD: admin # LOCAL DEMO VALUE - never reuse anywhere real
       KC_HEALTH_ENABLED: "true"
+      # Invariant: the iss claim of every token is exactly http://localhost:8180/realms/payflow, whichever address
+      # asked for it. The services expect that issuer (PAYFLOW_ISSUER_URI) and fetch the keys at keycloak:8080.
+      KC_HOSTNAME: http://localhost:8180
     ports:
       - "127.0.0.1:8180:8080"
     volumes:
       - ./keycloak/payflow-realm.json:/opt/keycloak/data/import/payflow-realm.json:ro
+    healthcheck:
+      # The image has no curl or wget: bash opens a TCP socket to the management port (9000) and reads the status line.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.0\\r\\n\\r\\n' >&3 && read -r status <&3 && [[ $${status} == *' 200'* ]]"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  payment-service:
+    build:
+      context: ../payment-service
+    image: payflow/payment-service:0.1.0-SNAPSHOT
+    mem_limit: 768m
+    # Hardened: Spring Boot and Tomcat write only to /tmp, so the root filesystem can be read-only.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      PAYMENT_BIND: 0.0.0.0
+      PAYMENT_DB_URL: jdbc:postgresql://postgres:5432/payment?logServerErrorDetail=false
+      PAYMENT_DB_PASSWORD: payment # LOCAL DEMO VALUE - never reuse anywhere real
+      KAFKA_BOOTSTRAP: kafka:29092
+      PAYFLOW_ISSUER_URI: http://localhost:8180/realms/payflow
+      PAYFLOW_JWK_SET_URI: http://keycloak:8080/realms/payflow/protocol/openid-connect/certs
+    ports:
+      - "127.0.0.1:8081:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    healthcheck:
+      # The JRE image has no curl or wget: bash opens a TCP socket and reads the HTTP status line (200 = UP).
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8081 && printf 'GET /actuator/health HTTP/1.0\\r\\n\\r\\n' >&3 && read -r status <&3 && [[ $${status} == *' 200'* ]]"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  wallet-service:
+    build:
+      context: ../wallet-service
+    image: payflow/wallet-service:0.1.0-SNAPSHOT
+    mem_limit: 768m
+    # Hardened: Spring Boot and Tomcat write only to /tmp, so the root filesystem can be read-only.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      WALLET_BIND: 0.0.0.0
+      WALLET_DB_URL: jdbc:postgresql://postgres:5432/wallet?logServerErrorDetail=false
+      WALLET_DB_PASSWORD: wallet # LOCAL DEMO VALUE - never reuse anywhere real
+      KAFKA_BOOTSTRAP: kafka:29092
+      PAYFLOW_ISSUER_URI: http://localhost:8180/realms/payflow
+      PAYFLOW_JWK_SET_URI: http://keycloak:8080/realms/payflow/protocol/openid-connect/certs
+    ports:
+      - "127.0.0.1:8082:8082"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8082 && printf 'GET /actuator/health HTTP/1.0\\r\\n\\r\\n' >&3 && read -r status <&3 && [[ $${status} == *' 200'* ]]"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  risk-1:
+    build:
+      context: ../risk-service
+    image: payflow/risk-service:0.1.0-SNAPSHOT
+    mem_limit: 768m
+    # Hardened: Spring Boot and Tomcat write only to /tmp, so the root filesystem can be read-only.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      RISK_BIND: 0.0.0.0
+      RISK_DB_URL: jdbc:postgresql://postgres:5432/risk?logServerErrorDetail=false
+      RISK_DB_PASSWORD: risk # LOCAL DEMO VALUE - never reuse anywhere real
+      KAFKA_BOOTSTRAP: kafka:29092
+      PAYFLOW_ISSUER_URI: http://localhost:8180/realms/payflow
+      PAYFLOW_JWK_SET_URI: http://keycloak:8080/realms/payflow/protocol/openid-connect/certs
+      RISK_HAZELCAST_MEMBERS: "risk-1:5701,risk-2:5701"
+      RISK_HAZELCAST_PORT: "5701"
+      # Invariant: Hazelcast listens only on the members-only network (subnet below), never on the default one.
+      RISK_HAZELCAST_BIND: "172.28.77.*"
+    ports:
+      - "127.0.0.1:8083:8083"
+    networks:
+      default:
+      risk-cluster:
+        ipv4_address: 172.28.77.11
+    # Docker DNS may answer a member name with its address on the default network; /etc/hosts pins it to the cluster one.
+    extra_hosts:
+      - "risk-2:172.28.77.12"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8083 && printf 'GET /actuator/health HTTP/1.0\\r\\n\\r\\n' >&3 && read -r status <&3 && [[ $${status} == *' 200'* ]]"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  risk-2:
+    # Invariant: one image, built once (by risk-1). Two services building the same tag race in `compose build`.
+    image: payflow/risk-service:0.1.0-SNAPSHOT
+    pull_policy: never
+    mem_limit: 768m
+    # Hardened: Spring Boot and Tomcat write only to /tmp, so the root filesystem can be read-only.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      RISK_BIND: 0.0.0.0
+      RISK_DB_URL: jdbc:postgresql://postgres:5432/risk?logServerErrorDetail=false
+      RISK_DB_PASSWORD: risk # LOCAL DEMO VALUE - never reuse anywhere real
+      KAFKA_BOOTSTRAP: kafka:29092
+      PAYFLOW_ISSUER_URI: http://localhost:8180/realms/payflow
+      PAYFLOW_JWK_SET_URI: http://keycloak:8080/realms/payflow/protocol/openid-connect/certs
+      RISK_HAZELCAST_MEMBERS: "risk-1:5701,risk-2:5701"
+      RISK_HAZELCAST_PORT: "5701"
+      RISK_HAZELCAST_BIND: "172.28.77.*"
+    # host port 8084 (container still 8083); the Hazelcast port is never published
+    ports:
+      - "127.0.0.1:8084:8083"
+    networks:
+      default:
+      risk-cluster:
+        ipv4_address: 172.28.77.12
+    extra_hosts:
+      - "risk-1:172.28.77.11"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8083 && printf 'GET /actuator/health HTTP/1.0\\r\\n\\r\\n' >&3 && read -r status <&3 && [[ $${status} == *' 200'* ]]"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
 
 volumes:
   postgres-data:
+
+networks:
+  # Invariant: only the two risk members are on this network, and it has no route out, so nothing else can reach
+  # the unauthenticated Hazelcast port (docs/adr/0002-architecture.md, trust boundary).
+  risk-cluster:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.28.77.0/24

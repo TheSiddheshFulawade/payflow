@@ -34,6 +34,10 @@ spring:
           # The realm that issues the tokens. Boot reads its keys lazily, on the first token, so the service (and its
           # health check) starts without Keycloak. The audience is payflow.security.audience (default payflow-api).
           issuer-uri: ${PAYFLOW_ISSUER_URI}
+          # Where the keys are fetched. Inside a container the issuer URL (localhost) is not the Keycloak host, so
+          # compose sets it; the default is Keycloak's key path under the issuer, which keeps local runs one setting.
+          # The issuer claim is still checked against issuer-uri.
+          jwk-set-uri: ${PAYFLOW_JWK_SET_URI:${spring.security.oauth2.resourceserver.jwt.issuer-uri}/protocol/openid-connect/certs}
 
 server:
   # loopback unless told otherwise; the container sets WALLET_BIND=0.0.0.0

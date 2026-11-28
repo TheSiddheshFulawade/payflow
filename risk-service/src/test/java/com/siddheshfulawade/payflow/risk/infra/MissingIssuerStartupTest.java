@@ -72,4 +72,18 @@ class MissingIssuerStartupTest {
                 .as("start-up without an issuer")
                 .satisfies(failure -> assertThat(stackTrace(failure)).contains("PAYFLOW_ISSUER_URI"));
     }
+
+    @Test
+    @DisplayName("REQ-PF-003 a BLANK issuer with a jwk-set-uri set fails the start (no silent loss of the iss check)")
+    void blankIssuerWithJwkSetUriFailsStart() {
+        assumeThat(System.getenv("PAYFLOW_ISSUER_URI")).isNull();
+
+        // Boot adds the issuer validator only when the issuer has text, so blank + jwk-set-uri would accept any iss
+        assertThatThrownBy(() -> start(
+                                "--PAYFLOW_ISSUER_URI=",
+                                "--PAYFLOW_JWK_SET_URI=http://keycloak.test/realms/payflow/protocol/openid-connect/certs")
+                        .close())
+                .as("start-up with a blank issuer")
+                .isInstanceOf(Exception.class);
+    }
 }

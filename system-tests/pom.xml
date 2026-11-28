@@ -26,5 +26,11 @@
       <artifactId>jackson-databind</artifactId>
       <scope>test</scope>
     </dependency>
+    <dependency>
+      <!-- Test scope: waits for the payment to reach a terminal state (ADR-0001, test row). -->
+      <groupId>org.awaitility</groupId>
+      <artifactId>awaitility</artifactId>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
 </project>

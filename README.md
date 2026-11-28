@@ -18,12 +18,18 @@ recovery sweeper, OAuth 2.0 resource servers validating Keycloak JWTs, and a Spr
 Chaos tests built on Testcontainers stop, pause and restart components while payments are in flight, then check the
 money invariants.
 
-## Run it (after PF-08)
+## Run it
+
+Needs Docker and about 5.5 GB of free memory for the containers (the sum of their limits in `deploy/compose.yaml`).
 
 ```
-docker compose -f deploy/compose.yaml up -d
-./deploy/demo.ps1      # seeds wallets, gets a token, sends payments
+./mvnw -DskipTests package                       # the Dockerfiles copy target/*.jar
+docker compose -f deploy/compose.yaml up -d --build --wait
+./deploy/demo.sh                                 # Windows PowerShell: ./deploy/demo.ps1
 ```
+
+The demo gets a token from Keycloak, seeds two wallets, sends payments with an `Idempotency-Key` and prints each
+payment's final state. Details and ports: `deploy/README.md`.
 
 ## Decisions
 
@@ -222,6 +228,15 @@ Filled in task by task: what was chosen, the alternative, and why.
   upgrade until the file is regenerated, and a missing or empty file stops the member. Not allowed: arbitrary JDK causes
   and suppressed lists (a `ConnectException` cause is refused, tested). `MemberLeftException.readObject` resolves the
   host the sender wrote, so a crafted stream can force a DNS lookup; accepted, the member port is trust-the-network.
+- **Containers (PF-08): layered Boot jar built on the host, exact-tag JRE base, numeric non-root user, heap as a
+  percentage of the container limit; one Hazelcast network that is `internal`**. Alternative: Maven or buildpacks
+  inside Docker - slower, and a second way to build the jar. Alternative: a floating `21-jre` tag - the image would
+  change under a rebuild. Keycloak puts `http://localhost:8180/realms/payflow` in every token (`KC_HOSTNAME`), but
+  `localhost` inside a container is the container itself, so the services take the issuer from `PAYFLOW_ISSUER_URI` and
+  the keys from `PAYFLOW_JWK_SET_URI` (`keycloak:8080`): the issuer claim is still checked (a blank issuer stops the start), the keys come over the
+  private network. Every published port binds `127.0.0.1`; the Hazelcast port is never published and its network has no
+  route out, so only the two risk members can reach a port that has no authentication. Memory is capped per container
+  (5.5 GB total) so the stack fits a laptop. The app containers are read-only with `/tmp` as tmpfs, no capabilities and no-new-privileges, and the system test runs under its own compose project name (`payflow-systemtest`).
 
 - **Reconciliation compares a one-day window, reports a pair once on the payment line's date, and only reconciles
   closed dates (today - 2 UTC or older)**. Alternative: compare only the same-day lines - a payment captured at 23:59
