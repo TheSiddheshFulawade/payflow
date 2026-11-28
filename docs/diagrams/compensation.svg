@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 600" width="900" height="600" role="img" aria-labelledby="t d">
+<title id="t">PayFlow compensation: release the hold, end REVERSED</title>
+<desc id="d">Three things start compensation once the reserve was sent: risk-service answers RiskRejected naming its rule, wallet-service answers CaptureFailed because the payee wallet is unknown, frozen or closed or there is no active hold, or a step gets no reply before its deadline and the sweeper has already re-sent it three times. The payment moves to RELEASING and ReleaseFunds goes into the outbox in the same transaction. wallet-service moves the held amount back to the payer's available balance and answers FundsReleased, and the payment ends REVERSED; if nothing was ever held, the wallet stores a RELEASED marker and answers the same. If the hold was already captured, the wallet answers FundsCaptured, moves nothing, and the payment ends COMPLETED. A release is re-sent until the wallet answers. A refusal at the first step ends REJECTED with nothing held.</desc>
+<style>
+svg{--bg:#fff;--fg:#1f2328;--mu:#59636e;--ln:#8c959f;--bx:#f6f8fa;--bl:#d0d7de;--ac:#0969da;--ok:#1a7f37;--wn:#9a6700;--bd:#cf222e}
+@media (prefers-color-scheme: dark){svg{--bg:#0d1117;--fg:#e6edf3;--mu:#9198a1;--ln:#6e7681;--bx:#161b22;--bl:#30363d;--ac:#4493f8;--ok:#3fb950;--wn:#d29922;--bd:#f85149}}
+text{font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:12px;fill:var(--fg)}
+.bg{fill:var(--bg)}
+.h{font-size:13px;font-weight:600}
+.m{font-size:11px;fill:var(--mu)}
+.c{text-anchor:middle}
+.st{font-size:12px;font-weight:600;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+.lb{paint-order:stroke;stroke:var(--bg);stroke-width:4px;stroke-linejoin:round}
+.bx{fill:var(--bx);stroke:var(--bl)}
+.tr{fill:var(--bx);stroke:var(--bd)}
+.rel{fill:var(--bx);stroke:var(--wn);stroke-width:2}
+.rev{fill:var(--bx);stroke:var(--ac);stroke-width:2}
+.ok{fill:var(--bx);stroke:var(--ok);stroke-width:2}
+.ar{stroke:var(--ln);stroke-width:1.6;fill:none}
+.ah{fill:var(--ln)}
+.hl{opacity:0;animation:on 15s infinite}
+.hl path,.hl line{stroke:var(--ac);stroke-width:3;fill:none;stroke-dasharray:7 5;animation:go .8s linear infinite}
+.hl rect{fill:none;stroke:var(--ac);stroke-width:3}
+@keyframes on{0%{opacity:0}2%{opacity:1}15%{opacity:1}16.6%,100%{opacity:0}}
+@keyframes go{to{stroke-dashoffset:-24}}
+@media (prefers-reduced-motion: reduce){.hl{display:none}*{animation:none!important}}
+</style>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0 0L10 5L0 10z"/></marker></defs>
+<rect class="bg" width="900" height="600"/>
+
+<text class="m" x="20" y="24">Once the reserve was sent, three things start compensation:</text>
+<rect class="tr" x="20" y="36" width="270" height="84" rx="6"/>
+<text class="h" x="34" y="58">Risk rejects</text>
+<text class="st" x="34" y="80">RISK_CHECKING</text>
+<text x="34" y="98">← RiskRejected (rule id)</text>
+<text class="m" x="34" y="113">payment limit, daily total or velocity</text>
+
+<rect class="tr" x="315" y="36" width="270" height="84" rx="6"/>
+<text class="h" x="329" y="58">Capture fails</text>
+<text class="st" x="329" y="80">CAPTURING</text>
+<text x="329" y="98">← CaptureFailed (reason)</text>
+<text class="m" x="329" y="113">payee unknown, frozen or closed; no hold</text>
+
+<rect class="tr" x="610" y="36" width="270" height="84" rx="6"/>
+<text class="h" x="624" y="58">A step times out</text>
+<text x="624" y="78">no reply by the deadline: the sweeper</text>
+<text x="624" y="94">re-sends 3 times (attempts 1 to 4),</text>
+<text class="m" x="624" y="113">then releases with reason TIMEOUT</text>
+
+<line class="ar" x1="155" y1="120" x2="352" y2="176" marker-end="url(#a)"/>
+<line class="ar" x1="450" y1="120" x2="450" y2="174" marker-end="url(#a)"/>
+<line class="ar" x1="745" y1="120" x2="548" y2="176" marker-end="url(#a)"/>
+
+<rect class="rel" x="300" y="178" width="300" height="58" rx="8"/>
+<text class="st c" x="450" y="202">RELEASING</text>
+<text class="m c" x="450" y="222">ReleaseFunds written to the outbox, same transaction</text>
+
+<path class="ar" d="M600 200 C690 200 690 300 632 300" marker-end="url(#a)"/>
+<text class="m lb" x="700" y="236">no answer yet:</text>
+<text class="m lb" x="700" y="251">re-sent until the</text>
+<text class="m lb" x="700" y="266">wallet answers</text>
+
+<line class="ar" x1="450" y1="236" x2="450" y2="268" marker-end="url(#a)"/>
+<rect class="bx" x="250" y="270" width="380" height="88" rx="6"/>
+<text class="h c" x="440" y="292">wallet-service handles ReleaseFunds</text>
+<text class="c" x="440" y="312">hold RESERVED → RELEASED: held − amount, available + amount</text>
+<text class="m c" x="440" y="330">no hold yet: a RELEASED marker is stored, so a late</text>
+<text class="m c" x="440" y="345">ReserveFunds is refused and nothing stays held</text>
+
+<line class="ar" x1="360" y1="358" x2="240" y2="438" marker-end="url(#a)"/>
+<text class="lb" x="185" y="398">FundsReleased</text>
+<rect class="rev" x="140" y="440" width="200" height="48" rx="24"/>
+<text class="st c" x="240" y="462">REVERSED</text>
+<text class="m c" x="240" y="478">payer has it all back</text>
+
+<line class="ar" x1="530" y1="358" x2="640" y2="438" marker-end="url(#a)"/>
+<text class="lb" x="600" y="390">FundsCaptured</text>
+<text class="m lb" x="600" y="405">(hold already captured)</text>
+<rect class="ok" x="540" y="440" width="200" height="48" rx="24"/>
+<text class="st c" x="640" y="462">COMPLETED</text>
+<text class="m c" x="640" y="478">payee has it; nothing moves</text>
+
+<g class="hl" style="animation-delay:0s"><rect x="20" y="36" width="270" height="84" rx="6"/><line x1="155" y1="120" x2="352" y2="176"/></g>
+<g class="hl" style="animation-delay:2.5s"><rect x="315" y="36" width="270" height="84" rx="6"/><line x1="450" y1="120" x2="450" y2="174"/></g>
+<g class="hl" style="animation-delay:5s"><rect x="610" y="36" width="270" height="84" rx="6"/><line x1="745" y1="120" x2="548" y2="176"/></g>
+<g class="hl" style="animation-delay:7.5s"><rect x="300" y="178" width="300" height="58" rx="8"/><line x1="450" y1="236" x2="450" y2="268"/><rect x="250" y="270" width="380" height="88" rx="6"/></g>
+<g class="hl" style="animation-delay:10s"><line x1="360" y1="358" x2="240" y2="438"/><rect x="140" y="440" width="200" height="48" rx="24"/></g>
+<g class="hl" style="animation-delay:12.5s"><line x1="530" y1="358" x2="640" y2="438"/><rect x="540" y="440" width="200" height="48" rx="24"/></g>
+
+<text class="m" x="20" y="528">Only the wallet's answer ends a release, so a payment never ends REVERSED while money is still held.</text>
+<text class="m" x="20" y="546">A reply that does not match the payment's current step and attempt changes nothing (while RELEASING, any attempt's final answer counts).</text>
+<text class="m" x="20" y="564">The first step is different: FundsRejected (insufficient funds, wallet frozen or unknown, owner mismatch) ends REJECTED; nothing is held.</text>
+<text class="m" x="20" y="582">A payment whose command is still unsent in the outbox is postponed: it gets a new deadline and no attempt is counted.</text>
+</svg>

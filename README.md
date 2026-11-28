@@ -1,282 +1,244 @@
 # PayFlow
 
-**Crash-safe payment orchestration.** Kill any service, or the Kafka broker, in the middle of a payment: every
-payment still ends `COMPLETED`, `REVERSED` or `REJECTED`, with no money lost and nothing charged twice.
+Three Spring Boot services take each payment through a saga over Kafka (hold the money, check risk, capture) and end
+it `COMPLETED`, `REVERSED` (any hold returned before capture; there are no refunds) or `REJECTED`. The chaos tests
+kill a service or a risk member, pause payment-service or restart the Kafka broker in the middle of a batch, and found
+no money lost or moved twice in the runs below.
 
-> Open source (MIT). Status: in development (v1 due 30 November 2026). The spec is in [SPEC.md](SPEC.md); the decisions are in [docs/adr](docs/adr).
+[![Licence: MIT](docs/badges/licence-mit.svg)](LICENSE)
+[![Java 21, CI on 21 and 25](docs/badges/java-21.svg)](.github/workflows/ci.yml)
+[![Release v1.0.0 planned, not tagged yet](docs/badges/release-v1.0.0.svg)](https://github.com/TheSiddheshFulawade/payflow/releases)
 
-## What it is
+Open source (MIT). Nothing is hosted: you run it on your own machine with Docker Compose. The requirements, design and
+tasks are in [SPEC.md](SPEC.md).
 
-Three Spring Boot microservices that talk only through Kafka:
+## What is checked
 
-- **payment-service**: REST API with idempotency keys, and the saga orchestrator (authorise → risk-check → capture)
-- **wallet-service**: wallets with available and held balances; reserve, capture and release
-- **risk-service**: payment and daily limits, plus velocity limits shared by a two-member Hazelcast cluster
+After every system and chaos run, `InvariantChecker` reads the databases and checks six invariants over the payments
+and wallets of that run
+([InvariantChecker.java](system-tests/src/test/java/com/siddheshfulawade/payflow/system/invariants/InvariantChecker.java)):
 
-The same patterns run through all of them: transactional outbox, idempotent consumers (inbox), saga timeouts with a
-recovery sweeper, OAuth 2.0 resource servers validating Keycloak JWTs, and a Spring Batch end-of-day reconciliation.
-Chaos tests built on Testcontainers stop, pause and restart components while payments are in flight, then check the
-money invariants.
+1. **Money is conserved.** The sum of `available + held` over the run's wallets equals what was seeded.
+2. **Nothing stays held.** The sum of `held` is 0 once every payment has ended.
+3. **Every payment ends.** Each one is `COMPLETED`, `REVERSED` or `REJECTED`; none is left in a middle state.
+4. **A completed payment moved money exactly once.** It has exactly one debit of the payer's held balance and one credit
+   of the payee's available balance, both of the payment amount. Fewer would be a lost capture, more a double charge.
+5. **A reversed or rejected payment moved no money.** No capture, and every hold was released.
+6. **One payment per (client, `Idempotency-Key`).** A request sent again by the same client with the same key creates no second payment (the
+   checker); the test harness also checks that every copy got the same payment id.
 
-## Run it
+Each chaos test also asserts the exact number of payments in each final state, because a fault that turned a refusal
+into a completion would keep the money consistent and pass the invariants alone.
 
-Needs Docker and about 5.5 GB of free memory for the containers (the sum of their limits in `deploy/compose.yaml`).
+Below the system tests: jqwik properties drive the real saga state machine against a model wallet, risk service and a
+network that loses, duplicates, reorders and delays messages, and check after every step that a payment ends once and
+is captured at most once
+([SagaModelPropertyTest](payment-service/src/test/java/com/siddheshfulawade/payflow/payment/domain/SagaModelPropertyTest.java)).
+The database guards the money as well: balances have `CHECK (>= 0)`, and a unique index on `(payment_id, kind)` stops a
+payment from writing the same ledger movement twice.
 
+Passing tests show that no violation was found in those runs. They are not a formal proof.
+
+## Results
+
+**Chaos scenarios C1 to C5.** Each sends a batch of 40 payments from 10 payers with a known mix of outcomes and
+injects its fault once 20 requests are accepted (half the batch; in C5, 20 of the 120 copies; in C3 the 7 extra
+payments are sent after the kill)
+([ChaosSystemTest.java](system-tests/src/test/java/com/siddheshfulawade/payflow/system/ChaosSystemTest.java)).
+Then every payment must end within 3 minutes and all six invariants must hold. They did, in every run below.
+
+| Scenario | Fault | Payments | COMPLETED / REVERSED / REJECTED | Laptop | GitHub runner |
+| -------- | ----- | -------- | ------------------------------- | -----: | ------------: |
+| C1 | wallet-service killed, restarted after 5 s | 40 | 15 / 5 / 20 | 49 s | 49 s |
+| C2 | Kafka broker restarted | 40 | 15 / 5 / 20 | 11 s | 10 s |
+| C3 | risk-1 killed; risk-2 alone, plus 7 payments from one payer | 47 | 20 / 7 / 20 | 50 s | 50 s |
+| C4 | payment-service paused for 45 s, past every step deadline | 40 | 15 / 5 / 20 | 51 s | 50 s |
+| C5 | every request sent 3 times at once with one key, plus C1's kill | 40 from 120 requests | 15 / 5 / 20 | 116 s | 49 s |
+
+- In C3 one payer sends 7 small payments within a minute while risk-1 is down. The run ended 20 / 7 / 20, the outcome
+  expected if the velocity limit (5 per payer in 60 s) stopped the 6th and 7th; the test checks the totals, not the
+  rule id of each payment.
+- **Time** is from the start of the scenario (seeding its wallets) to the invariant check.
+- **Conditions:** one run of each scenario on each machine; not a benchmark, and the times depend on the machine and
+  the test order. Laptop: AMD Ryzen 7 5800H (16 logical processors), 15.4 GB RAM, Windows 11, Docker Desktop 28.1.1,
+  2026-11-28 (94 system-module tests, 0 failures). GitHub: the `system` job on an `ubuntu-24.04` runner, JDK 25,
+  [run 46152086282](https://github.com/TheSiddheshFulawade/payflow/actions/runs/46152086282) on commit `9698c6d`. The
+  laptop's C5 took longer; the cause was not investigated.
+- **Not checked:** C6 (two payment-service instances at once) was cut (SPEC section 8), so two live orchestrators
+  were never run against each other. The optimistic `version` guard behind REQ-PF-014 is checked by integration tests
+  in which two handlers race for one payment
+  ([ReplyConcurrencyTest](payment-service/src/test/java/com/siddheshfulawade/payflow/payment/app/ReplyConcurrencyTest.java)). The chaos runs do not run reconciliation (the job takes closed dates only, see below).
+
+**Reconciliation (Spring Batch).** 10,000 payments in 2.4 s and 100,000 in 19.3 s of job time (22.6 s with the JVM
+start), every pair `MATCHED`. The rows were **seeded** into the payment and wallet databases on a closed business date,
+not sent through the saga, because the job only reconciles dates up to today minus 2. The job itself is the real one: it
+downloads both statements over HTTP with an `ops` token, stages them in chunks of 1,000, matches and writes the report.
+The data is a clean mix (80 % completed, 10 % reversed, 10 % rejected), so this is the throughput of a clean day, not
+the cost of finding breaks. One run each, on the laptop above: the job on the host (JDK 25), the services in containers. Details and the command
+to repeat it: [docs/results/PF-10-measured-run.md](docs/results/PF-10-measured-run.md).
+
+## Run it with one command
+
+Needs Git, JDK 21 or newer (to build the jars), and Docker with at least 6 GB of memory for its VM (the containers'
+limits add up to 5.5 GB). Build the jars once, then one command starts the stack and one runs the demo:
+
+```bash
+git clone https://github.com/TheSiddheshFulawade/payflow.git
+cd payflow
+./mvnw -DskipTests package                                    # the Dockerfiles copy target/*.jar
+docker compose -f deploy/compose.yaml up -d --build --wait    # 7 containers, returns when all are healthy
+./deploy/demo.sh                                              # Windows PowerShell: ./deploy/demo.ps1
 ```
-./mvnw -DskipTests package                       # the Dockerfiles copy target/*.jar
-docker compose -f deploy/compose.yaml up -d --build --wait
-./deploy/demo.sh                                 # Windows PowerShell: ./deploy/demo.ps1
+
+The demo gets tokens from Keycloak, seeds a payer and a payee wallet through the ops API, sends four payments with an
+`Idempotency-Key`, waits for each to end and prints the states. Expected: **2 `COMPLETED`, 1 `REVERSED`** (5,000,001
+minor units is over the single-payment risk limit, which is checked after the hold, so the hold is released) **and
+1 `REJECTED`** (more than the payer has, refused at the hold).
+
+On the laptop above, `demo.ps1` printed exactly that on 2026-11-28 on this compose stack (recorded in the
+[PF-08 session log](docs/sessions/2026-11-28-06-pf08-docker-recon.md)); the stack was built with `compose build`, then
+started with `up -d --wait`, before a later fix to how the risk image is built.
+`demo.sh` does the same steps but has only been syntax-checked (`bash -n`), not run against the stack. Ports, the
+memory budget and design notes for the stack: [deploy/README.md](deploy/README.md). Stop it with
+`docker compose -f deploy/compose.yaml down` (add `-v` to delete the database volume).
+
+## How it works, in three pictures
+
+**The happy path.** Money is held first, then checked, then captured. Every message between the services goes through
+the sender's outbox and Kafka.
+
+![Animated sequence diagram: the client posts a payment with an Idempotency-Key and a JWT; payment-service moves it from RECEIVED to RESERVING in one transaction with ReserveFunds in its outbox and answers 202; wallet-service holds the amount and answers FundsReserved; risk-service checks the per-payment limit, daily total and velocity and answers RiskApproved; wallet-service moves the amount from the payer's held balance to the payee's available balance and answers FundsCaptured; the payment is COMPLETED and the client reads it with a GET](docs/diagrams/saga-happy-path.svg)
+
+**Compensation.** Every failure after the reserve was sent, except the wallet's own refusal (`REJECTED`), ends in a
+release, and only the wallet's answer ends it.
+`REVERSED` means nothing is held and nothing was captured: the hold was returned, or there never was one.
+
+![Animated diagram: RiskRejected, CaptureFailed, or a step with no reply after three re-sends moves the payment to RELEASING with ReleaseFunds in the outbox; wallet-service moves the held amount back to available and answers FundsReleased, and the payment ends REVERSED; if the hold was already captured the wallet answers FundsCaptured and the payment ends COMPLETED; a release is re-sent until the wallet answers](docs/diagrams/compensation.svg)
+
+**Outbox and inbox.** One transaction writes the state and the message; a redelivered message has no second effect.
+
+![Animated diagram: payment-service updates the payment and inserts the message into its outbox in one transaction; a relay sends unsent rows to Kafka with acks=all and marks them sent after every ack; wallet-service inserts the message id into its inbox in the same transaction as the effect and the reply; a redelivery of the same message id inserts nothing, has no effect, and the stored reply is queued again](docs/diagrams/outbox-inbox.svg)
+
+The animations stop when your system asks for reduced motion, and each picture reads the same when it is still.
+
+## Modules
+
+```mermaid
+flowchart LR
+  client["client<br/>(demo script, tests)"]
+  kc["Keycloak<br/>issues JWTs"]
+  pay["<b>payment-service</b><br/>REST API, Idempotency-Key,<br/>saga orchestrator, sweeper"]
+  kafka[["Kafka<br/>commands and replies"]]
+  wal["<b>wallet-service</b><br/>wallets, holds,<br/>reserve / capture / release"]
+  risk["<b>risk-service</b> x2<br/>limits, daily totals,<br/>velocity in Hazelcast"]
+  recon["<b>reconciliation</b><br/>Spring Batch job"]
+  pg[("PostgreSQL<br/>one database per service:<br/>payment, wallet, risk, recon")]
+  libs["contracts + messaging<br/>(shared jars: message records,<br/>outbox, relay, inbox)"]
+
+  client -->|JWT| pay
+  client -->|ops token: seed wallets| wal
+  kc -.->|token| client
+  pay <-->|outbox and inbox| kafka
+  kafka <--> wal
+  kafka <--> risk
+  pay --- pg
+  wal --- pg
+  risk --- pg
+  recon -->|statements over HTTP, ops token| pay
+  recon -->|statements over HTTP, ops token| wal
+  recon --- pg
+  libs -.->|used by| pay
+  libs -.->|used by| wal
+  libs -.->|used by| risk
 ```
 
-The demo gets a token from Keycloak, seeds two wallets, sends payments with an `Idempotency-Key` and prints each
-payment's final state. Details and ports: `deploy/README.md`.
+The services share no database and no domain classes; they share only the message records and the messaging code
+(two jars in this one repository, a trade-off recorded in [ADR-0002](docs/adr/0002-architecture.md)). `system-tests`
+starts the whole stack with Docker Compose and runs the end-to-end and chaos scenarios.
 
-## Decisions
+| Module | What it holds |
+| ------ | ------------- |
+| `contracts` | Message records (commands and replies) with a version, topic names, a strict JSON codec |
+| `messaging` | Outbox table and relay (`FOR UPDATE SKIP LOCKED`), inbox and the idempotent consumer |
+| `payment-service` | REST API, `Idempotency-Key`, saga state machine, sweeper, statement export |
+| `wallet-service` | Wallets (`available`, `held`), holds, ledger entries, ops seeding API, statement export |
+| `risk-service` | Per-payment limit, payer daily total, velocity in a two-member Hazelcast cluster |
+| `reconciliation` | End-of-day job: download both statements, stage, match, write the report |
+| `system-tests` | Compose stack, end-to-end and chaos scenarios, the invariant checker |
 
-Filled in task by task: what was chosen, the alternative, and why.
+## Key decisions
 
-- **Spring Boot BOM imported, not the parent** — alternative: `spring-boot-starter-parent` — our own parent holds the
-  build rules (enforcer, Spotless, JaCoCo, test tags) shared by libraries and services, and Maven allows one parent.
-- **Monorepo with shared `contracts` and `messaging` jars** — alternative: a repository per service with copied
-  message classes — one change updates every service in one pull request; the cost is coupling through shared jars
-  (ADR-0002 #1, SPEC §3 trade-off).
-- **JaCoCo excludes `*Application` bootstrap classes** — alternative: a test that calls `main()`, or lowering the
-  gate — `main()` only calls `SpringApplication.run`, and the context tests already start each app.
-- **Spring Boot 4.1.2** — alternative: 4.2.0, which exists — same version as settlement-lab for alignment across
-  projects; upgrading later is one separate change.
-- **Hazelcast 5.7.0 Community (Apache 2.0)** — alternative: Enterprise, or the CP Subsystem for strict
-  consistency — Enterprise is not open source (the enforcer bans it), and velocity limits need only IMap with an
-  EntryProcessor, not CP.
-- **One PostgreSQL server, one database and owner per service** — alternative: a server per service — the same
-  separation of data (CONNECT revoked from PUBLIC) for a laptop demo with less RAM.
-- **Outbox with a polling relay; `sent_at` only after every `acks=all` ack** — alternative: publish to Kafka directly,
-  or Debezium change-data-capture — a direct publish cannot commit with the database, so a crash loses or invents
-  messages; Debezium adds another moving part. Polling with `SKIP LOCKED` is a few lines, and an early resend is
-  harmless because consumers dedupe.
-- **Inbox in the effect's transaction** — alternative: Kafka exactly-once transactions — Kafka EOS covers only
-  Kafka-to-Kafka, while our effects are PostgreSQL rows; the dedupe must commit with the effect (ADR-0002 #5).
-- **Retry 500 ms × 9 then dead-letter topic; poison messages are not retried** — alternative: retry forever — a stuck
-  record blocks every payment on its listener thread. The saga sweeper re-sends a parked command and handlers are
-  idempotent; a message that cannot be decoded fails the same way every time, so retrying only delays.
-- **Closed type registry built from the sealed permits** — alternative: Jackson `@JsonTypeInfo` default typing — the
-  JSON must never choose a Java class (deserialization-gadget risk); the registry is complete at compile time and an
-  unknown type is poison.
-- **`messaging` owns Flyway migration V1 in `db/messaging`; services start at V2** — alternative: copy the DDL into
-  each service — one definition of outbox and inbox cannot drift between three services.
-- **`messaging` coverage gated under `-Pit` only** — alternative: a unit-only gate — its behaviour lives in Postgres
-  and Kafka (`SKIP LOCKED`, `ON CONFLICT`, acks); a unit-only gate would measure mocks, not behaviour.
-- **Strict message codec: no coercion, duplicate keys rejected, 64 KiB / depth 16, bounded fields** — alternative:
-  Jackson's lenient defaults — the defaults silently turned `100.99` into `100` and let a second `amount` key win
-  (found by the PF-02 security review). Money must fail loudly, and a bounded record can never block the outbox relay.
-  Error messages name the field, never its value, so logs and the DLT carry no payment data.
-- **Hold row = permanent decision, and a per-payment lock** — alternative: a PostgreSQL advisory lock, or the inbox
-  alone — the sweeper re-sends with a new message id, so the inbox cannot see the duplicate; the primary key on
-  `hold.payment_id` records the decision once and serialises all commands of one payment.
-- **Relative guarded updates under ordered row locks** — alternative: read-then-write with a `version` check — the
-  database applies `available = available - amount` to the current value, so no update overwrites another and a busy
-  wallet never retries; wallets lock in id order, so crossing payments cannot deadlock.
-- **Release tombstone** — alternative: ignore a Release with no hold — two `SKIP LOCKED` relays can deliver Release
-  before Reserve; without the tombstone the late Reserve would hold money for a payment that already ended REVERSED.
-- **Unique `(payment_id, kind)` ledger index** — alternative: trust the code — a payment can never move money twice
-  even if a code bug slips past the tests; the database refuses it.
-- **Seeding needs no Idempotency-Key; the wallet id is the key (409 on a retry)** — alternative: a key header — the
-  id already names the one wallet, so a retried seed changes nothing and says so.
-- **16 KiB body limit by Content-Length; chunked bodies refused 411 on every write method** — alternative: buffer and
-  count bytes — the container never reads past the declared length, so an endless body cannot use memory. The filter
-  runs first and Boot's form filter is off, because that filter reads PUT/PATCH/DELETE form bodies before any limit.
-- **A command that contradicts a held or captured hold is a poison message, not a rejection** — alternative: reply
-  `FundsRejected(HOLD_MISMATCH)` — a rejection could end the saga REJECTED while the money is still held; the dead-letter
-  topic keeps it for a human, with a fixed text and no account values. The hold records the payee on capture so a
-  re-sent capture naming another payee is caught too.
-- **DB password from the environment, no default** — alternative: a demo default in `application.yml` — a missing
-  secret fails at startup instead of silently using a known one; demo values live only in `deploy/`.
-- **Velocity call inside the database transaction, bounded at 1 s (was 5 s until PF-06)** — alternative: count after the commit — a payment could then be approved with no
-  slot taken. Before the commit, an UNKNOWN count (unreachable, timeout, missing backup ack) throws, rolls back and is
-  retried: fail closed. A rolled-back attempt is harmless: the window holds distinct payment ids, so the retry finds
-  its own slot. A redelivered check keeps its first slot time, and a member with a fast clock prunes early; both
-  accepted. The cost is row locks and a listener thread held while we wait, hence the bound.
-- **Permanent decision row with a PENDING claim** — alternative: the inbox alone — the sweeper re-sends with a new
-  message id, so the inbox cannot see it; the primary key on `risk_decision.payment_id` decides once, serialises all
-  checks of a payment, and a repeat for other money is poison, not an answer.
-- **Daily total locked per payer and UTC day, approved amounts only, reversals give no headroom back** — alternative:
-  sum over the decisions, or a business time zone — a locked row makes one payer's payments take turns and read a
-  committed total; summing would scan and race. UTC is one fixed rule with no daylight saving, and a limit that only
-  counts up is simple to explain.
-- **Velocity TTL derived from the window (2 x, rounded up)** — alternative: a fixed TTL — a longer window can never get
-  a shorter TTL, and an entry outlives its newest payment despite small clock differences between members.
-- **Member-only port, exact-name allow-list for Java deserialization, a missing backup ack is an error** —
-  alternative: the default unified port (also serves clients), package prefixes, and answering anyway — Hazelcast's
-  defaults allow all of `java.*`, so Java deserialization may create only the exact classes listed (no packages, no
-  prefixes). Other serializers (`DataSerializable`, zero-config Compact) are not covered by the list. The port has no
-  authentication (TLS and member authentication are Enterprise-only) and the member list is discovery, not an access
-  list, so the real control is the network: loopback or a members-only network, never published (ADR-0002). A single
-  MEMBER endpoint refuses Hazelcast clients. With `fail.on.indeterminate.state=true` a missing backup ack throws, the
-  transaction rolls back and the idempotent retry follows; nothing more is claimed.
-- **A member starts only when every partition has an owner (30 s bound)** — alternative: Hazelcast's lazy assignment at
-  the first use — the first checks then race the partition table to the other member, which drops a backup for a
-  partition it does not know yet, without an ack; one drop starts a replica sync that can overtake the next backups, so
-  up to 16 of 40 checks waited out their 5 s (measured). The start ends that race for the first checks of a member; it
-  does not remove a lost backup ack in general (a member dying or joining): that check throws and its retry is
-  idempotent. PF-06 added a wait for a safe cluster, see below.
-- **Embedded two members, no split-brain protection** — alternative: a quorum or the CP subsystem — an unknown count
-  refuses, but a LOST count approves: during a split, after all members restart (the map is in memory only), or when
-  an owner is lost before its backup caught up, a payer may pass more than 5 in a window (up to twice during a split).
-  Accepted, because velocity is a risk control, not a money invariant. The daily total and the decision are in
-  PostgreSQL and stay exact.
-- **RECEIVED and RESERVING in one transaction**. Alternative: commit RECEIVED first and move on in a second step - one
-  commit means a crash leaves either nothing (the client retries with the same key) or a payment with its
-  `ReserveFunds` already in the outbox. There is no committed payment that nobody is working on.
-- **Unique constraint plus a request hash over the parsed fields, at READ COMMITTED**. Alternative: check with a
-  `select` first, or hash the raw body - a check-then-insert races; the constraint lets the database pick one winner and
-  the loser waits, then reads the winner's row, which needs READ COMMITTED (REPEATABLE READ would fail the insert). A
-  hash of the fields (each with its length) ignores spacing and key order. Same key and body returns the original
-  (200); same key and another body is 422.
-- **Optimistic `version` in a guarded update**. Alternative: `select ... for update` - reads take no lock, and
-  `update ... where version = ?` lets one transaction win; the loser rolls back everything and is redelivered, then
-  decides on the new state. Contention on one payment is rare, so retries are cheap and no lock is held across the
-  handler.
-- **Reply handlers return empty and append the next command to the outbox themselves**. Alternative: return the next
-  command as the inbox's stored reply - a duplicate reply would re-send the command, the wallet would answer the
-  duplicate command with its stored reply, and the two services would loop forever.
-- **Client id is the constant `local` until PF-07**. Alternative: an `X-Client-Id` header - a header lets any caller
-  read or block another client's keys. The JWT subject replaces the constant in PF-07; until then the service listens
-  on loopback only.
-- **Compensation replies (`RiskRejected`, `CaptureFailed`) threw until PF-06** (changed by PF-06: they now move the
-  payment to RELEASING, see below). Alternative: ignore them - money is held, so ignoring would leave it held with no
-  trace. For PF-05 the retries ended in the dead-letter topic, where they were visible.
-- **Terminal state `REVERSED`, not `REFUNDED`**. Alternative: `REFUNDED` - in card terms a refund returns captured
-  money, but here the hold is released and the payer's money never left, which is an authorisation reversal. The name
-  now matches the money movement (`RELEASING`, `ReleaseFunds` and `FundsReleased` keep their names). No behaviour change.
-- **Sweeper: ids first without a lock, then one transaction per overdue payment with `for update skip locked`**.
-  Alternative: one transaction for the whole batch - one failing payment would roll back the good ones and the locks
-  would be held for the whole batch. Deadline and state are checked again under the lock, so a reply or another
-  instance that got there first just makes the sweeper skip. Known limit: 50 payments that fail on every sweep could
-  fill each batch (logged, accepted).
-- **A re-send is the same payload with a new message id and `attempt + 1`**. Alternative: the same message id - the
-  receiver's inbox would drop it as a duplicate. The payload is rebuilt from the payment row, so it cannot differ. Wallet
-  and risk answer a repeat from their stored decision. Replies to an older attempt are ignored.
-- **A release answered `FundsCaptured` ends `COMPLETED`**. Alternative: end `REVERSED` anyway - the payee already has
-  the money, so REVERSED would be false. Only `FundsReleased` ends REVERSED, and a release is re-sent forever (with a
-  WARN from attempt 4), never given up while money may be held.
-- **Re-send a step 3 times (attempts 1 to 4), backoff doubling to a 30 s cap, then release**. Alternative: fixed
-  intervals - a service that is down would be flooded. Risk waits 5 + 10 + 20 + 30 = 65 s, reserve and capture 90 s.
-  A long outage can therefore end healthy payments REVERSED: money is safe, the client pays again.
-- **The sender re-sends instead of Kafka retries (`RetriedBySenderException`)**. Alternative: keep the
-  500 ms x 9 retries - with velocity down one command held the instance's listener thread (it serves all partitions)
-  for about 55 s against a 5 s deadline. Now the velocity call is bounded to 1 s, the failure is parked after one
-  delivery (dead-letter topic), the transaction rolls back the inbox row, and the payment's deadline makes the sweeper
-  send the check again. Cost: with one listener thread an instance gets through about one check per second in a
-  velocity outage; checks queued behind a few others miss their 5 s deadline and are re-sent, not lost.
-- **While RELEASING the wallet's final answer counts for any attempt; every other state needs the exact attempt**.
-  Alternative: exact attempt everywhere - a release is re-sent forever with the deadline capped at 30 s, so a wallet
-  slower than the cap always answers an older attempt and no answer ever matched (found by the PF-06 audit by reading;
-  the first property test was green because it had no latency, and then reproduced it once latency was added). A
-  released, rejected or captured hold never changes again, so an old answer is as true as a new one.
-- **An overdue payment whose command is still unsent in the outbox is postponed** (same attempt, new deadline, no
-  command). Alternative: re-send and count the attempt anyway - a broker outage would spend every attempt, release
-  healthy payments and flood the outbox. REQ-PF-012 is read as "a reply is overdue only for a published command".
-  Accepted: a command the broker never takes keeps its payment and hold waiting until the fault is repaired, visible
-  by a WARN per sweep. Alternative: postpone only up to a maximum age. Known edge: a command published just before its
-  deadline gets a short wait, so it may be re-sent early or its payment released early; both are safe.
-- **A late `CheckRisk` of an already REVERSED payment is still counted** (daily total, and for 60 s a velocity slot).
-  Alternative: look up the payment state in risk - risk has no view of it, and a count that only grows fails closed.
-  Accepted.
-- **Hazelcast: a pause over 10 s evicts a member, and each side may count alone until the merge**. Alternative: longer
-  heartbeat limits - a hung member would then delay checks for longer. Merge timing is to be set in PF-09.
-- **`idle_in_transaction_session_timeout = 60 s` in payment-service**. Alternative: rely on TCP keepalive - it can take
-  hours to drop a dead session, and meanwhile a frozen instance's relay would hold its outbox rows and the sweeper would
-  keep postponing those payments. The relay's normal wait inside its transaction is up to 55 s (10 s in `send()` for
-  each of 2 topics, plus 35 s for the acks), so 60 s does not cut off a healthy relay. A relay cut off anyway rolls back
-  and sends again; the inbox drops the duplicates. Wallet and risk get the same setting in PF-08.
-- **Hazelcast heartbeat 1 s, a hung member evicted after 10 s** (default 60 s). Alternative: the defaults - a check
-  would depend on a member that is gone for a minute. 10 s is well inside the 65 s of risk re-sends.
-- **A member is handed out once the cluster is safe; not safe in 30 s (one limit with the owner wait): one WARN, and it
-  starts anyway**. Alternative: hand it out when every partition has an owner - in CI run 45660859725 one of 40 checks
-  that began during the join migrations got no answer and timed out at 1 s (a lost backup ack is inferred; it was not
-  reproduced in 100 local runs). Alternative: refuse to start - a check that times out fails closed and is re-sent, a
-  missing member answers nothing. A member already running still serves checks while another joins, and one of those
-  can still time out.
-- **Index in a new migration `V3__overdue_index.sql`**. Alternative: edit `V2` - an applied migration must never change
-  (Flyway checksum), and a partial index on `deadline_at` stays small because only in-flight payments have a deadline.
-- **Security in all three services (PF-07): audience checked by a custom `OAuth2TokenValidator`; deny by default;
-  roles from `realm_access.roles` without `ROLE_`**. Alternative: the `audiences` property of Boot - when empty it
-  checks nothing, so a config slip turns the check off without a sound; our validator also refuses a token without
-  `exp` (the standard check skips it) and a subject outside the one rule, in all three services. Spring Security 7's
-  protected-resource metadata filter cannot be switched off, so each chain removes it; that path is 401 like any other. Alternative to the final `denyAll()`: rules
-  for the known paths only - HEAD on a payment slipped past GET-only rules; now whatever no rule names is 401 or 403.
-  The 401, 403 and firewall 400 bodies are fixed problem details, and `WWW-Authenticate` has no `error_description`
-  (it would name the issuer or audience to someone probing). The issuer has no default: a missing `PAYFLOW_ISSUER_URI`
-  stops the start. The audience is shared by the three services, so it keeps foreign tokens out; roles separate the
-  services. Keycloak users have fixed ids so wallets seeded for them survive a realm reset.
-- **The owner check is in wallet-service: `ReserveFunds` carries `requester` (the creator's JWT `sub`)**. Alternative:
-  payment-service reads the wallet owner - no cross-service reads (the services share only messages), and the read
-  would race with changes. The check comes after `WALLET_UNKNOWN` and before frozen and funds (a stranger learns
-  nothing about a wallet), under the row lock, holds nothing, and the REJECTED decision is stored, so a re-send gets the
-  same answer and the owner cannot revive it. Another customer's payment or wallet gives the same 404 as an unknown id
-  (no existence leak).
-- **`ReserveFunds` gained a required field while the message version stays 1**. Alternative: version 2 now - nothing
-  is released (the repo is public, v1.0.0 is not out), so there are no old readers. Cost: a `ReserveFunds` already in
-  Kafka without `requester` is poison (dead-letter); after the deadline the sweeper re-sends a command rebuilt from the
-  payment row, now with `requester`, up to 3 times, then releases (the payment ends `REVERSED`, nothing held).
-  Deploy wallet-service first. After v1.0.0 a new required field means version 2 and a window where both are read.
-- **Every Hazelcast error is in the deserialization allow-list, as exact class names generated from a jar scan**
-  (`hazelcast-allowed-errors.txt`, 124 names: 112 Hazelcast errors and 12 JDK and other base classes up to `Throwable`).
-  Alternative: hand-pick the errors a velocity check expects - that missed `PartitionStateVersionMismatchException`, so
-  in CI run 45877124629 a join migration's error reply could not be read, the migration was never answered and the
-  cluster stayed unsafe for 30 s (likely also the "inferred lost ack" above). Alternative: allow the `com.hazelcast.`
-  prefix - that opens every Serializable class in the jar to a crafted stream. The scan test fails on a Hazelcast
-  upgrade until the file is regenerated, and a missing or empty file stops the member. Not allowed: arbitrary JDK causes
-  and suppressed lists (a `ConnectException` cause is refused, tested). `MemberLeftException.readObject` resolves the
-  host the sender wrote, so a crafted stream can force a DNS lookup; accepted, the member port is trust-the-network.
-- **Containers (PF-08): layered Boot jar built on the host, exact-tag JRE base, numeric non-root user, heap as a
-  percentage of the container limit; one Hazelcast network that is `internal`**. Alternative: Maven or buildpacks
-  inside Docker - slower, and a second way to build the jar. Alternative: a floating `21-jre` tag - the image would
-  change under a rebuild. Keycloak puts `http://localhost:8180/realms/payflow` in every token (`KC_HOSTNAME`), but
-  `localhost` inside a container is the container itself, so the services take the issuer from `PAYFLOW_ISSUER_URI` and
-  the keys from `PAYFLOW_JWK_SET_URI` (`keycloak:8080`): the issuer claim is still checked (a blank issuer stops the start), the keys come over the
-  private network. Every published port binds `127.0.0.1`; the Hazelcast port is never published and its network has no
-  route out, so only the two risk members can reach a port that has no authentication. Memory is capped per container
-  (5.5 GB total) so the stack fits a laptop. The app containers are read-only with `/tmp` as tmpfs, no capabilities and no-new-privileges, and the system test runs under its own compose project name (`payflow-systemtest`).
+- **Orchestrated saga: hold, check, capture.** Money leaves the payer only at capture, so every compensation is a
+  release of the hold, and `REVERSED` is reached only on the wallet's answer
+  ([PF-05](docs/DECISIONS.md#pf-05-payment-api-and-saga), [PF-06](docs/DECISIONS.md#pf-06-compensation-timeouts-and-sweeper)).
+- **Transactional outbox with a polling relay**, not a direct publish or Debezium: the message commits with the state;
+  rows are claimed with `SKIP LOCKED` and marked sent only after every `acks=all` ack
+  ([PF-02](docs/DECISIONS.md#pf-02-messaging-outbox-inbox-codec)).
+- **Inbox in the effect's transaction**, not Kafka exactly-once: the effects are PostgreSQL rows, so the dedupe must
+  commit with them. A re-send with a new message id is caught by a decision row keyed by payment id
+  ([PF-02](docs/DECISIONS.md#pf-02-messaging-outbox-inbox-codec), [PF-03](docs/DECISIONS.md#pf-03-wallet)).
+- **A sweeper re-sends a step 3 times with backoff, then releases**; a release is re-sent until the wallet answers,
+  and a payment whose command is still unsent in the outbox is postponed, with no attempt counted
+  ([PF-06](docs/DECISIONS.md#pf-06-compensation-timeouts-and-sweeper)).
+- **Relative guarded balance updates under ordered row locks**, plus `CHECK (>= 0)` and a unique ledger index, so a
+  bug cannot move a payment's money twice ([PF-03](docs/DECISIONS.md#pf-03-wallet)).
+- **Velocity in a Hazelcast `IMap` with an `EntryProcessor`**: an unknown count fails closed; a split cluster may
+  over-approve, accepted because velocity is a risk control, not a money invariant
+  ([PF-04](docs/DECISIONS.md#pf-04-risk-and-hazelcast-velocity)).
+- **Keycloak JWTs checked in every service**, deny by default, a custom audience check, and the owner check in
+  wallet-service ([PF-07](docs/DECISIONS.md#pf-07-security)).
+- **Reconciliation only of closed dates** (today minus 2 or older), and a wallet line may fall on the day before or after
+  its payment line, so a payment that crosses midnight is not a false break ([PF-10](docs/DECISIONS.md#pf-10-reconciliation)).
 
-- **Reconciliation compares a one-day window, reports a pair once on the payment line's date, and only reconciles
-  closed dates (today - 2 UTC or older)**. Alternative: compare only the same-day lines - a payment captured at 23:59
-  and completed at 00:01 is then MISSING_IN_WALLET on one day and MISSING_IN_PAYMENTS on the other, a false alarm every
-  midnight. A wider window hides real gaps; one day covers the settle time. The matcher takes the adjacent days' lines
-  only to find the other half, a repeat of an id with different content is refused, and a statement above 64 MiB, a
-  line in another currency or a bad date stops the run before anything is staged. A fresh run clears the date's staging
-  (a stale line never reaches the report); a restart keeps it.
+Every decision, with the alternative and the reason, is in [docs/DECISIONS.md](docs/DECISIONS.md). Study notes for
+each task are in [docs/learn](docs/learn).
 
-- **PF-08 fix: the risk image is built once (risk-1 builds, risk-2 has `pull_policy: never`)**. Alternative: both risk
-  services with a `build:` section - two services building the same tag at the same time race inside `compose build`.
-  risk-2 starts after the image exists and must never try to pull `payflow/risk-service` from a registry.
-- **PF-10 measured run: rows seeded directly on a closed date, not sent through the saga**. Alternative: drive 100,000
-  payments through the saga - the job only reconciles dates up to today minus 2, so those payments cannot be reconciled
-  yet, and the run would measure the saga, not the job. The job is real and unchanged; the data is a clean 80/10/10
-  mix, so the numbers (10,000 in 2.4 s, 100,000 in 19.3 s, all MATCHED, one run each) are throughput of a clean day,
-  not the cost of finding breaks. Details: `docs/results/PF-10-measured-run.md`.
+## The saga
 
-- **System and chaos tests (PF-09): `psql` through `docker compose exec`, one compose stack per JVM, exact outcome
-  counts plus invariants**. Alternative to psql: a JDBC driver and a published Postgres port in the test module - an
-  extra dependency (ADR 0001) and a port to expose; psql is already in the container and the test reads only ids,
-  states and numbers, with every id checked against `[a-z0-9-]` first (`SafeIds`). Alternative to one stack per JVM:
-  one stack per test - a start takes minutes and memory fits one stack only; sharing is safe because every scenario
-  seeds wallets with ids of its own and reads only those. The cost is that a stack broken by one test hurts the next,
-  so each fault is undone in a `finally`. The stack runs under project `payflow-systemtest` and refuses to start while
-  the demo stack (`payflow`) is up, so it can neither remove nor talk to it. Alternative to invariants only: the batch
-  is deterministic (15 COMPLETED, 5 REVERSED, 20 REJECTED), so each test also asserts these exact counts - a
-  fault that turned a reject into a completion would keep the money consistent and slip past invariants alone.
-  The price is that a changed batch needs the numbers changed. "Reconciliation reports only MATCHED" is not checked
-  in chaos runs (the job takes closed dates only); the PF-10 measured run covers the job on clean data. C6 (two
-  payment-service instances) is cut by SPEC section 8. Results: one run each on one machine, see Results.
+| Step | Command (payment → X) | Success reply | Failure reply | On failure |
+| ---- | --------------------- | ------------- | ------------- | ---------- |
+| 1 | `ReserveFunds` → wallet | `FundsReserved` | `FundsRejected` (insufficient funds, wallet frozen or unknown, owner mismatch) | `REJECTED` |
+| 2 | `CheckRisk` → risk | `RiskApproved` | `RiskRejected` (rule id) | `ReleaseFunds` → `REVERSED` |
+| 3 | `CaptureFunds` → wallet | `FundsCaptured` | `CaptureFailed` (payee unknown, frozen or closed; no active hold) | `ReleaseFunds` → `REVERSED` |
+
+States: `RECEIVED → RESERVING → RISK_CHECKING → CAPTURING → COMPLETED`, plus `RELEASING → REVERSED` (or `COMPLETED` if the hold was already captured) and `REJECTED`.
+`REVERSED` is an authorisation reversal in card terms: the held money, if any, goes back to the payer's available balance; a
+refund would return captured money, and PayFlow has no refunds.
+Every message is keyed by payment id, delivered at least once, and handled idempotently. Step deadlines are 10 s
+(reserve, capture, release) and 5 s (risk) for the first attempt, doubling per re-send up to 30 s; the sweeper runs every 2 s. Full design: [SPEC.md](SPEC.md) section 4.
+
+## Run the tests
+
+```bash
+./mvnw verify            # unit tests, JaCoCo >= 80 % per service, Spotless, ArchUnit, enforcer
+./mvnw verify -Pit       # plus integration tests: PostgreSQL, Kafka, Keycloak in Testcontainers, a two-member Hazelcast cluster in the JVM; needs Docker
+./mvnw -DskipTests package && ./mvnw verify -Psystem -pl system-tests   # end-to-end and chaos; needs Docker
+```
+
+On Windows use `mvnw.cmd`. GitHub Actions runs `verify` on Ubuntu and Windows with JDK 21 and 25, the integration
+tests and the system and chaos tests on Ubuntu with JDK 25, on every pull request and every push to `main`
+([ci.yml](.github/workflows/ci.yml)).
+
+## Scope and limits
+
+- **Not hosted, not a production system, no real money.** It runs on your machine. A capture is a transfer between
+  two demo wallet rows in one database: there is no settlement and no external payment rail. The Keycloak users, client secrets and database
+  passwords in `deploy/` are local demo values, marked as such; never reuse them.
+- **One currency** (INR, amounts as `long` minor units), no UI, no API gateway, no Kubernetes, no metrics stack
+  (SPEC section 2 lists what is out on purpose).
+- **Single machine.** Every result above comes from one laptop or one GitHub runner, one run each.
+- **Velocity is approximate under failure:** during a Hazelcast split, or after both members restart, a payer may pass
+  more than 5 payments in a window. The daily total and every money rule are in PostgreSQL and stay exact.
+- **Images are not pinned by digest**, only by exact tag.
+- **Known issue:** `SafeIds.sqlList` in the system tests turns an empty list into `in ()`, which is invalid SQL; the
+  system tests seed wallets before they call it, so they never pass an empty list. It is left open on purpose as a learning exercise (a disabled `// TODO-ME` test
+  in [SafeIdsTest.java](system-tests/src/test/java/com/siddheshfulawade/payflow/system/SafeIdsTest.java)), like the
+  other `TODO-ME` items (disabled tests, plus one ArchUnit rule to add).
 
 ## Third-party
 
 `reconciliation/src/main/resources/db/migration/V1__batch_schema.sql` is copied from Spring Batch (Apache License 2.0,
 Copyright the Spring Batch authors).
-
-## Results
-
-The chaos scenarios table and the reconciliation numbers arrive with PF-09 and PF-10.
 
 ## Licence
 
