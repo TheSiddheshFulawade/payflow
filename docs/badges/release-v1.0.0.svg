@@ -1,10 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="132" height="20" role="img" aria-label="release: v1.0.0 planned">
-  <title>release: v1.0.0 planned</title>
-  <rect width="132" height="20" rx="3" fill="#555"/>
-  <rect x="54" width="78" height="20" rx="3" fill="#2da44e"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="104" height="20" role="img" aria-label="release: v1.0.0">
+  <title>release: v1.0.0</title>
+  <rect width="104" height="20" rx="3" fill="#555"/>
+  <rect x="54" width="50" height="20" rx="3" fill="#2da44e"/>
   <rect x="54" width="4" height="20" fill="#2da44e"/>
   <g fill="#fff" font-family="system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="11" text-anchor="middle">
     <text x="27" y="14">release</text>
-    <text x="93" y="14">v1.0.0 planned</text>
+    <text x="79" y="14">v1.0.0</text>
   </g>
 </svg>
