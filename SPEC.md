@@ -64,7 +64,7 @@ leaves the payer until capture, so compensation is always a hold release.
 
 | Step | Command (payment → X)                                    | Success reply   | Failure reply                                         | On failure                  |
 | ---- | -------------------------------------------------------- | --------------- | ----------------------------------------------------- | --------------------------- |
-| 1    | `ReserveFunds` → wallet                                  | `FundsReserved` | `FundsRejected` (insufficient, wallet frozen/unknown) | → `REJECTED`                |
+| 1    | `ReserveFunds` → wallet                                  | `FundsReserved` | `FundsRejected` (insufficient, wallet frozen/unknown, owner mismatch) | → `REJECTED`                |
 | 2    | `CheckRisk` → risk                                       | `RiskApproved`  | `RiskRejected` (rule id)                              | `ReleaseFunds` → `REVERSED` |
 | 3    | `CaptureFunds` → wallet (debit payer hold, credit payee) | `FundsCaptured` | `CaptureFailed` (payee frozen/closed)                 | `ReleaseFunds` → `REVERSED` |
 
@@ -101,8 +101,11 @@ API and security
 - REQ-PF-002 When the same `Idempotency-Key` is sent again by the same client with the same body, payment-service shall
   return the original payment (200) and create nothing; with a different body it shall return 422.
 - REQ-PF-003 Every endpoint except `GET /actuator/health` shall require a JWT issued by the configured Keycloak realm;
-  `payments:write` to create, `payments:read` to read; a customer may read only payments where they are the payer;
-  `ops` role for seeding wallets, statements and reconciliation.
+  `payments:write` to create, `payments:read` to read; a client may read only the payments they created (JWT `sub`
+  = the payment's client id). The wallet holds money only when the payer wallet's owner is the creator, so every
+  payment that held money was created by the payer's owner. A payment that never held money (still reserving, refused
+  with `WALLET_UNKNOWN` or `OWNER_MISMATCH`, or released before any reserve) may have been created by anyone,
+  and only its creator can read it. `ops` role for seeding wallets, statements and reconciliation.
 - REQ-PF-004 Invalid input (amount ≤ 0, > 10,000,000 minor units, same payer and payee, unknown fields, wrong
   currency) shall return RFC 9457 problem details, never a stack trace.
 
@@ -191,7 +194,7 @@ and run on Ubuntu only) and `system` on Ubuntu (chaos tests, on every PR to main
 - [x] PF-06 Compensation, timeouts and sweeper; jqwik state-machine properties (REQ-PF-011 to 013)
 - [x] PF-07 Security: resource servers in all three services, realm roles, owner check, problem details for 401/403,
       one Keycloak container test (REQ-PF-003)
-- [ ] PF-08 Dockerfiles (layered Boot jars, non-root), full `compose.yaml`, `demo` script (PowerShell and sh) (REQ-PF-051)
+- [x] PF-08 Dockerfiles (layered Boot jars, non-root), full `compose.yaml`, `demo` script (PowerShell and sh) (REQ-PF-051)
 - [ ] PF-09 system-tests: end-to-end scenarios and chaos C1–C6 with the invariant checker; CI `system` job (REQ-PF-050)
 - [ ] PF-10 Reconciliation: statement export endpoints, Spring Batch job (download, stage in chunks of 1,000, match,
       report), restart test, measured run of 100,000 payments (REQ-PF-040 to 042)

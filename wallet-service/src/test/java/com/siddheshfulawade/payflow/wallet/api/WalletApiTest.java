@@ -16,6 +16,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.siddheshfulawade.payflow.wallet.app.Statements;
 import com.siddheshfulawade.payflow.wallet.app.WalletAdminService;
 import com.siddheshfulawade.payflow.wallet.app.WalletAlreadyExistsException;
 import com.siddheshfulawade.payflow.wallet.app.WalletNotFoundException;
@@ -48,6 +49,9 @@ class WalletApiTest {
 
     @MockitoBean
     WalletAdminService service;
+
+    @MockitoBean
+    Statements statements;
 
     private ResultActions postWallet(String json) throws Exception {
         return mvc.perform(post(OPS).contentType(MediaType.APPLICATION_JSON).content(json));

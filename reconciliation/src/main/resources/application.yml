@@ -3,3 +3,28 @@ spring:
     name: reconciliation
   main:
     web-application-type: none
+  # Defaults match deploy/compose.yaml. The password has no default on purpose: demo secrets live in deploy/ only.
+  datasource:
+    # logServerErrorDetail=false: row values stay out of logs
+    url: ${RECON_DB_URL:jdbc:postgresql://localhost:5432/recon?logServerErrorDetail=false}
+    username: ${RECON_DB_USER:recon}
+    password: ${RECON_DB_PASSWORD}
+    hikari:
+      data-source-properties:
+        logServerErrorDetail: "false"
+  batch:
+    jdbc:
+      # Flyway creates the Batch tables (V1__batch_schema.sql)
+      initialize-schema: never
+    job:
+      # the job starts with the application: arguments "businessDate=2026-11-26"
+      enabled: true
+
+payflow:
+  recon:
+    # Where the two statements come from. Plain HTTP is for the local/compose network only; anywhere else use TLS.
+    # The ops token has no default: it is fetched at runtime and passed in from the environment, never committed.
+    payment-url: ${RECON_PAYMENT_URL:http://localhost:8081}
+    wallet-url: ${RECON_WALLET_URL:http://localhost:8082}
+    # Empty when unset, so @NotBlank fails the start: an unresolved placeholder would bind as literal text.
+    ops-token: ${RECON_OPS_TOKEN:}

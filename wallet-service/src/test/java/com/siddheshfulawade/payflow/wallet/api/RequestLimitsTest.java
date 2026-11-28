@@ -10,6 +10,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.siddheshfulawade.payflow.wallet.app.Statements;
 import com.siddheshfulawade.payflow.wallet.app.WalletAdminService;
 import com.siddheshfulawade.payflow.wallet.support.JwtDefaults;
 import jakarta.servlet.ServletContext;
@@ -44,6 +45,9 @@ class RequestLimitsTest {
 
     @MockitoBean
     WalletAdminService service;
+
+    @MockitoBean
+    Statements statements;
 
     @Test
     @DisplayName("REQ-PF-004 a body over 16 KiB is 413 and never read")

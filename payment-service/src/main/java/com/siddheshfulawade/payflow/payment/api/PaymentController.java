@@ -50,10 +50,10 @@ class PaymentController {
     }
 
     /**
-     * Invariant: a client reads only the payments it created (JWT {@code sub} = {@code client_id}). This is narrower than
-     * REQ-PF-003's "payer" rule: payment-service does not know wallet owners, and the wallet's owner check makes the
-     * creator the payer wallet's owner for every payment that held money. Someone else's payment is the same 404 as an
-     * unknown id, so the response does not tell whether the id exists.
+     * Invariant (REQ-PF-003): a client reads only the payments it created (JWT {@code sub} = {@code client_id}).
+     * payment-service does not know wallet owners; the wallet's owner check makes the creator the payer wallet's owner
+     * for every payment that held money. Someone else's payment is the same 404 as an unknown id, so the response does
+     * not tell whether the id exists.
      */
     @GetMapping("/{id}")
     PaymentView read(@PathVariable UUID id) {

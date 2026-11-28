@@ -196,9 +196,9 @@ services:
       start_period: 30s
 
   risk-2:
-    build:
-      context: ../risk-service
+    # Invariant: one image, built once (by risk-1). Two services building the same tag race in `compose build`.
     image: payflow/risk-service:0.1.0-SNAPSHOT
+    pull_policy: never
     mem_limit: 768m
     # Hardened: Spring Boot and Tomcat write only to /tmp, so the root filesystem can be read-only.
     read_only: true

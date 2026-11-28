@@ -44,12 +44,28 @@ class ComposeStackTest {
                 "risk-2", "risk-service");
         for (String app : APPS) {
             String block = services.get(app);
-            assertThat(block).as(app).containsPattern("(?m)^\\s+context:\\s*\\.\\./" + module.get(app) + "\\s*$");
             assertThat(block)
                     .as(app)
                     .containsPattern("(?m)^\\s+image:\\s*payflow/" + module.get(app) + ":[\\w.-]+\\s*$");
             assertThat(block).as(app).doesNotContain(":latest");
         }
+        for (String builder : List.of("payment-service", "wallet-service", "risk-1")) {
+            assertThat(services.get(builder))
+                    .as(builder)
+                    .containsPattern("(?m)^\\s+context:\\s*\\.\\./" + module.get(builder) + "\\s*$");
+        }
+    }
+
+    @Test
+    @DisplayName("REQ-PF-051 each image is built by exactly one service; risk-2 runs risk-1's image and never pulls it")
+    void eachImageIsBuiltOnce() throws IOException {
+        Map<String, String> services = services();
+
+        // Invariant: two services building the same tag race in `compose build` ("image already exists").
+        assertThat(services.get("risk-2")).as("risk-2").doesNotContain("build:");
+        assertThat(services.get("risk-2"))
+                .as("risk-2 must use the locally built image, not look for it on a registry")
+                .containsPattern("(?m)^\\s+pull_policy:\\s*never\\s*$");
     }
 
     @Test
