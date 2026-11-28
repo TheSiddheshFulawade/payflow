@@ -90,3 +90,49 @@ jobs:
           done
       - name: Verify with integration tests
         run: ./mvnw --batch-mode -C -s .github/maven-ci-settings.xml verify -Pit
+
+  system:
+    # End-to-end and chaos tests (profile "system"): the Docker Compose stack is built and started by the tests.
+    # Linux Docker only, so Ubuntu with the newest JDK. Runs on every pull request (SPEC section 7).
+    name: system (ubuntu-24.04, JDK 25)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+      - name: Download Maven, dependencies and plugins
+        run: |
+          for attempt in 1 2 3; do
+            ./mvnw --batch-mode --quiet -C -s .github/maven-ci-settings.xml \
+              org.apache.maven.plugins:maven-dependency-plugin:3.11.0:go-offline && exit 0
+            echo "Download attempt $attempt failed; retrying in $((attempt * 15)) s"
+            sleep $((attempt * 15))
+          done
+          exit 1
+      # The Dockerfiles copy target/*.jar, so the jars must exist before compose builds the images.
+      - name: Package the service jars
+        run: ./mvnw --batch-mode -C -s .github/maven-ci-settings.xml -DskipTests package
+      # Pre-pull the third-party images, retried, so a flaky registry does not fail the tests.
+      - name: Pre-pull compose images
+        run: |
+          for attempt in 1 2 3; do
+            docker compose -f deploy/compose.yaml pull postgres kafka keycloak && exit 0
+            echo "Pull failed (attempt $attempt); retrying in $((attempt * 15)) s"
+            sleep $((attempt * 15))
+          done
+          exit 1
+      - name: Run the system and chaos tests
+        run: ./mvnw --batch-mode -C -s .github/maven-ci-settings.xml verify -Psystem -pl system-tests
+      # Only on failure: print the tail of every container log so the failure can be diagnosed.
+      - name: Compose logs
+        if: failure()
+        run: docker compose -p payflow-systemtest -f deploy/compose.yaml logs --no-color --tail=300
+      - name: Tear down the stack
+        if: always()
+        run: docker compose -p payflow-systemtest -f deploy/compose.yaml down -v
