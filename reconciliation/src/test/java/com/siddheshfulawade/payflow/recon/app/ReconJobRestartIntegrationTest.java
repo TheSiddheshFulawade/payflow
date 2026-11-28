@@ -45,8 +45,8 @@ import org.springframework.test.context.DynamicPropertySource;
  */
 @Tag("it")
 @SpringBootTest(classes = ReconciliationApplication.class)
-@Import(ReconJobRestartIT.Stubs.class)
-class ReconJobRestartIT {
+@Import(ReconJobRestartIntegrationTest.Stubs.class)
+class ReconJobRestartIntegrationTest {
 
     // closed on any day the test runs: the job reconciles only D <= today (UTC) - 2
     private static final LocalDate DAY = LocalDate.now(java.time.ZoneOffset.UTC).minusDays(3);

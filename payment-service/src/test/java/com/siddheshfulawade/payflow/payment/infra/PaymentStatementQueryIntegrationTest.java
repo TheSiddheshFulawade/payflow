@@ -13,7 +13,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
 /** REQ-PF-040: the payment statement query (Testcontainers PostgreSQL; tag "it" comes from the base class). */
-class PaymentStatementQueryIT extends PaymentIntegrationTest {
+class PaymentStatementQueryIntegrationTest extends PaymentIntegrationTest {
 
     private static final LocalDate DAY = LocalDate.parse("2026-11-26");
 

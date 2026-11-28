@@ -11,7 +11,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
 /** REQ-PF-040: the wallet statement query (Testcontainers PostgreSQL; tag "it" comes from the base class). */
-class WalletStatementQueryIT extends WalletIntegrationTest {
+class WalletStatementQueryIntegrationTest extends WalletIntegrationTest {
 
     private static final LocalDate DAY = LocalDate.parse("2026-11-26");
     private static final UUID P1 = UUID.fromString("00000000-0000-0000-0000-000000000001");
