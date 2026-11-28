@@ -246,6 +246,29 @@ Filled in task by task: what was chosen, the alternative, and why.
   line in another currency or a bad date stops the run before anything is staged. A fresh run clears the date's staging
   (a stale line never reaches the report); a restart keeps it.
 
+- **PF-08 fix: the risk image is built once (risk-1 builds, risk-2 has `pull_policy: never`)**. Alternative: both risk
+  services with a `build:` section - two services building the same tag at the same time race inside `compose build`.
+  risk-2 starts after the image exists and must never try to pull `payflow/risk-service` from a registry.
+- **PF-10 measured run: rows seeded directly on a closed date, not sent through the saga**. Alternative: drive 100,000
+  payments through the saga - the job only reconciles dates up to today minus 2, so those payments cannot be reconciled
+  yet, and the run would measure the saga, not the job. The job is real and unchanged; the data is a clean 80/10/10
+  mix, so the numbers (10,000 in 2.4 s, 100,000 in 19.3 s, all MATCHED, one run each) are throughput of a clean day,
+  not the cost of finding breaks. Details: `docs/results/PF-10-measured-run.md`.
+
+- **System and chaos tests (PF-09): `psql` through `docker compose exec`, one compose stack per JVM, exact outcome
+  counts plus invariants**. Alternative to psql: a JDBC driver and a published Postgres port in the test module - an
+  extra dependency (ADR 0001) and a port to expose; psql is already in the container and the test reads only ids,
+  states and numbers, with every id checked against `[a-z0-9-]` first (`SafeIds`). Alternative to one stack per JVM:
+  one stack per test - a start takes minutes and memory fits one stack only; sharing is safe because every scenario
+  seeds wallets with ids of its own and reads only those. The cost is that a stack broken by one test hurts the next,
+  so each fault is undone in a `finally`. The stack runs under project `payflow-systemtest` and refuses to start while
+  the demo stack (`payflow`) is up, so it can neither remove nor talk to it. Alternative to invariants only: the batch
+  is deterministic (15 COMPLETED, 5 REVERSED, 20 REJECTED), so each test also asserts these exact counts - a
+  fault that turned a reject into a completion would keep the money consistent and slip past invariants alone.
+  The price is that a changed batch needs the numbers changed. "Reconciliation reports only MATCHED" is not checked
+  in chaos runs (the job takes closed dates only); the PF-10 measured run covers the job on clean data. C6 (two
+  payment-service instances) is cut by SPEC section 8. Results: one run each on one machine, see Results.
+
 ## Third-party
 
 `reconciliation/src/main/resources/db/migration/V1__batch_schema.sql` is copied from Spring Batch (Apache License 2.0,

@@ -319,6 +319,19 @@
       <properties>
         <tag.system.excluded>none</tag.system.excluded>
       </properties>
+      <build>
+        <pluginManagement>
+          <plugins>
+            <plugin>
+              <artifactId>maven-surefire-plugin</artifactId>
+              <configuration>
+                <!-- the JVM's shutdown hook runs `docker compose down -v` (up to 120 s): do not kill it earlier -->
+                <forkedProcessExitTimeoutInSeconds>150</forkedProcessExitTimeoutInSeconds>
+              </configuration>
+            </plugin>
+          </plugins>
+        </pluginManagement>
+      </build>
     </profile>
   </profiles>
 </project>

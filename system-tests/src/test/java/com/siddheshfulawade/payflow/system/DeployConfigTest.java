@@ -123,6 +123,35 @@ class DeployConfigTest {
         }
     }
 
+    @Test
+    void composeFixesNoContainerVolumeOrNetworkNamesSoProjectDownVIsolatesTheTestStack() throws IOException {
+        String compose = read(DEPLOY.resolve("compose.yaml"));
+
+        assertThat(compose)
+                .as("container_name is global, shared with the demo stack")
+                .doesNotContain("container_name:");
+        // top-level volumes: and networks: blocks (zero indent) up to the next top-level key
+        Matcher blocks = Pattern.compile("(?m)^(volumes|networks):\\s*\\R((?:[ \\t].*\\R?|\\s*\\R)*)")
+                .matcher(compose);
+        int found = 0;
+        while (blocks.find()) {
+            found++;
+            assertThat(blocks.group(2))
+                    .as("explicit name: under top-level %s", blocks.group(1))
+                    .doesNotContainPattern("(?m)^\\s+name:");
+        }
+        assertThat(found).as("top-level volumes and networks blocks").isEqualTo(2);
+    }
+
+    @Test
+    void systemProfileLetsTheForkedJvmFinishItsShutdownHookDownV() throws IOException {
+        String pom = read(ROOT.resolve("pom.xml"));
+        int profile = pom.indexOf("<id>system</id>");
+        assertThat(profile).as("system profile").isPositive();
+
+        assertThat(pom.substring(profile)).containsPattern("<forkedProcessExitTimeoutInSeconds>\\s*150\\s*<");
+    }
+
     private static void assertUser(JsonNode realm, String username, String... expectedRoles) {
         JsonNode user = find(realm.path("users"), "username", username);
         assertThat(user.isMissingNode()).as("user %s exists", username).isFalse();
